@@ -53,16 +53,28 @@ async fn main() -> Result<()> {
 
     let builder = Arc::new(Mutex::new(builder));
 
-    join_all(volume.page_links(&user).await.map(|(page_number, page)| {
+    let mut pages = join_all(volume.page_links(&user).await.map(|(page_number, page)| {
         let user = user.clone();
         let builder = builder.clone();
         tokio::spawn(async move {
-            page.write_to_epub(page_number, builder, &user)
-                .await
-                .unwrap()
+            (
+                page_number,
+                page.write_to_epub(page_number, builder, &user)
+                    .await
+                    .unwrap(),
+            )
         })
     }))
     .await;
+
+    pages.sort_by_key(|r| match r {
+        Ok(res) => res.0,
+        Err(_) => panic!(),
+    });
+
+    for (_, fun) in pages.into_iter().map(|r| r.unwrap()) {
+        fun();
+    }
 
     let mut builder = builder.lock().unwrap();
     let _ = builder.generate(&mut io::stdout());

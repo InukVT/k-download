@@ -54,7 +54,7 @@ impl Page {
         page_number: usize,
         builder: Arc<Mutex<EpubBuilder<ZipLibrary>>>,
         user: &User,
-    ) -> Result<()> {
+    ) -> Result<Box<dyn FnOnce() -> () + Send + 'static>> {
         let (file_name, title, reference_type) = match page_number {
             0 => (
                 "cover.jpeg".to_string(),
@@ -87,15 +87,15 @@ impl Page {
             .unwrap();
         }
 
-        let page_xml = Page::image_template(page_number, image_path);
-        let image: EpubContent<&[u8]> = EpubContent::new(page_path, page_xml.as_ref())
-            .title(title)
-            .reftype(reference_type);
+        Ok(Box::new(move || {
+            let page_xml = Page::image_template(page_number, image_path);
+            let image: EpubContent<&[u8]> = EpubContent::new(page_path, page_xml.as_ref())
+                .title(title)
+                .reftype(reference_type);
 
-        {
             let mut builder = builder.lock().unwrap();
-            builder.add_content(image).unwrap();
-        }
-        Ok(())
+
+            (*builder).add_content(image).unwrap();
+        }))
     }
 }
