@@ -5,5 +5,5 @@ pub mod volume;
 
 pub use library::Library;
 pub use page::Page;
-pub use user::User;
+pub use user::{Credentials, User};
 pub use volume::Volume;

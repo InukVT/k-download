@@ -1,83 +1,131 @@
 use std::io;
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::thread;
+use std::time::Duration;
+use std::time::Instant;
 
 use anyhow::Result;
-use epub_builder::EpubBuilder;
-use epub_builder::EpubVersion;
-use epub_builder::ZipLibrary;
-use futures::future::join_all;
-use kodansha_downloader::User;
+use kodansha_downloader::Credentials;
 use kodansha_downloader::Volume;
-use structopt::StructOpt;
 
-#[derive(StructOpt)]
-#[structopt(about = "Downloads a volume from Kodansha's web reader")]
-struct Cli {
-    #[structopt(short, long)]
-    username: String,
-    #[structopt(short, long)]
-    password: String,
-    #[structopt(
-        short,
-        long,
-        help = "The volume number in the url (e.g. \"https://api.kodansha.us/comic/10\" is 10)"
-    )]
-    volume: u16,
-}
+use crossterm::{
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
+use tui::backend::Backend;
+use tui::style::Color;
+use tui::style::Modifier;
+use tui::style::Style;
+use tui::text::Span;
+use tui::widgets::List;
+use tui::widgets::ListItem;
+use tui::widgets::ListState;
+use tui::{
+    backend::CrosstermBackend,
+    layout::{Constraint, Direction, Layout},
+    widgets::{Block, Borders, Widget},
+    Terminal,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let cli = Cli::from_args();
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
 
-    let volume = Volume::get(cli.volume).await?;
+    let tick_rate = Duration::from_millis(250);
+    run_app(&mut terminal, tick_rate).await?;
 
-    let user = User::new(cli.username.into(), cli.password.into()).await;
+    disable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
+    terminal.show_cursor()?;
+    //let user = Credentials::from_config()?.login().await?;
 
-    let zip = ZipLibrary::new().unwrap();
-    let mut builder = EpubBuilder::new(zip).unwrap();
+    //let volume = Volume::get(10).await?;
 
-    builder
-        .metadata("title", volume.volume_name.clone())
-        .unwrap()
-        .metadata(
-            "description",
-            volume.description.clone().replace("rsquo", "apos"),
-        )
-        //.unwrap()
-        //.metadata("series", volume.series_name.clone())
-        .unwrap()
-        .metadata("subject", "Manga")
-        .unwrap()
-        .epub_version(EpubVersion::V30);
-
-    let builder = Arc::new(Mutex::new(builder));
-
-    let mut pages = join_all(volume.page_links(&user).await.map(|(page_number, page)| {
-        let user = user.clone();
-        let builder = builder.clone();
-        tokio::spawn(async move {
-            (
-                page_number,
-                page.write_to_epub(page_number, builder, &user)
-                    .await
-                    .unwrap(),
-            )
-        })
-    }))
-    .await;
-
-    pages.sort_by_key(|r| match r {
-        Ok(res) => res.0,
-        Err(_) => panic!(),
-    });
-
-    for (_, fun) in pages.into_iter().map(|r| r.unwrap()) {
-        fun();
-    }
-
-    let mut builder = builder.lock().unwrap();
-    let _ = builder.generate(&mut io::stdout());
+    //let mut stdout = io::stdout();
+    //volume.write_epub_to(&user, &mut stdout).await?;
 
     Ok(())
+}
+
+async fn run_app<B>(terminal: &mut Terminal<B>, tick_rate: Duration) -> Result<()>
+where
+    B: Backend,
+{
+    let mut last_tick = Instant::now();
+    let mut state = ListState::default();
+
+    let values = vec!["Line 1", "Line 2", "Line 3"];
+    state.select(Some(0));
+    loop {
+        terminal.draw(|f| {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .margin(1)
+                .constraints(
+                    [
+                        Constraint::Percentage(40),
+                        Constraint::Percentage(50),
+                        Constraint::Percentage(10),
+                    ]
+                    .as_ref(),
+                )
+                .split(f.size());
+
+            let styled = Style::default();
+            let highlight_style = Style::default().add_modifier(Modifier::BOLD);
+            let list_items: Vec<ListItem> = values
+                .iter()
+                .map(|txt| {
+                    let span = Span::styled(txt.to_owned(), styled.clone());
+
+                    ListItem::new(span)
+                })
+                .collect();
+
+            let block = Block::default().title("Block").borders(Borders::ALL);
+            let list = List::new(list_items)
+                .block(block)
+                .highlight_style(highlight_style)
+                .highlight_symbol("> ");
+
+            f.render_stateful_widget(list, chunks[0], &mut state);
+        })?;
+
+        let timeout = tick_rate
+            .checked_sub(last_tick.elapsed())
+            .unwrap_or_else(|| Duration::from_secs(0));
+
+        if crossterm::event::poll(timeout)? {
+            if let Event::Key(key) = event::read()? {
+                match key.code {
+                    KeyCode::Char('q') => return Ok(()),
+                    KeyCode::Char('j') => state.select(
+                        state
+                            .selected()
+                            .map(|num| (num + 1) % values.iter().count()),
+                    ),
+                    KeyCode::Char('k') => {
+                        state.select(state.selected().map(|num| match num <= 0 {
+                            true => values.iter().count() - 1,
+                            false => num - 1,
+                        }))
+                    }
+                    _ => {}
+                }
+            }
+
+            if last_tick.elapsed() >= tick_rate {
+                //app.on_tick();
+                last_tick = Instant::now();
+            }
+        }
+    }
 }
