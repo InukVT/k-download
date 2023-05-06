@@ -6,9 +6,14 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-reqwest = { version = "0.11.17", features = ["json"] }
+reqwest = { version = "0.11.17", features = ["json", "stream"] }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 futures = "0.3.28"
 structopt = "0.3.26"
+tokio-util = { version = "0.7.8", features = ["full"] }
+tokio-fs = "0.1.7"
+futures-util = "0.3.28"
+epub-builder = {git = "https://github.com/lise-henry/epub-builder.git", branch = "master"}
+anyhow = "1.0.71"
