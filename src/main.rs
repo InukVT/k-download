@@ -63,6 +63,7 @@ where
     let mut state = ListState::default();
 
     let values = vec!["Line 1", "Line 2", "Line 3"];
+    let mut selected: Vec<usize> = vec![];
     state.select(Some(0));
     loop {
         terminal.draw(|f| {
@@ -83,14 +84,25 @@ where
             let highlight_style = Style::default().add_modifier(Modifier::BOLD);
             let list_items: Vec<ListItem> = values
                 .iter()
-                .map(|txt| {
-                    let span = Span::styled(txt.to_owned(), styled.clone());
+                .enumerate()
+                .map(|(index, txt)| {
+                    let span = Span::styled(
+                        format!(
+                            "{mark} {title}",
+                            mark = match selected.contains(&index) {
+                                true => "[x]",
+                                false => "[ ]",
+                            },
+                            title = txt
+                        ),
+                        styled.clone(),
+                    );
 
                     ListItem::new(span)
                 })
                 .collect();
 
-            let block = Block::default().title("Block").borders(Borders::ALL);
+            let block = Block::default().title("Library").borders(Borders::ALL);
             let list = List::new(list_items)
                 .block(block)
                 .highlight_style(highlight_style)
@@ -118,6 +130,19 @@ where
                             false => num - 1,
                         }))
                     }
+                    KeyCode::Char(' ') => {
+                        state.selected().map(|current| {
+                            match selected.iter().position(|&test| test == current) {
+                                Some(index) => {
+                                    selected.remove(index);
+                                }
+                                None => {
+                                    selected.push(current);
+                                }
+                            }
+                        });
+                    }
+
                     _ => {}
                 }
             }
