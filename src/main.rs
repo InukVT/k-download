@@ -53,7 +53,7 @@ async fn main() -> Result<()> {
 
     let builder = Arc::new(Mutex::new(builder));
 
-    for writer in join_all(volume.page_links(&user).await.map(|(page_number, page)| {
+    join_all(volume.page_links(&user).await.map(|(page_number, page)| {
         let user = user.clone();
         let builder = builder.clone();
         tokio::spawn(async move {
@@ -62,10 +62,7 @@ async fn main() -> Result<()> {
                 .unwrap()
         })
     }))
-    .await
-    {
-        writer.unwrap()();
-    }
+    .await;
 
     let mut builder = builder.lock().unwrap();
     let _ = builder.generate(&mut io::stdout());
