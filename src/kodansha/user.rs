@@ -1,9 +1,13 @@
+use std::path::Path;
+
 use anyhow::anyhow;
 use config::Config;
+use futures_util::future::BoxFuture;
+use futures_util::Future;
 use reqwest;
 use serde::{Deserialize, Serialize};
 use tokio::fs::File;
-use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
+use tokio::io::{copy, AsyncReadExt, AsyncWriteExt, BufWriter};
 
 use super::Library;
 
@@ -70,15 +74,30 @@ impl User {
 }
 
 impl Credentials {
-    pub fn from_config() -> anyhow::Result<Credentials> {
+    pub fn new(username: String, password: String) -> Credentials {
+        Credentials { username, password }
+    }
+    pub async fn from_config(
+        fallback: BoxFuture<'static, anyhow::Result<Credentials>>,
+    ) -> anyhow::Result<Credentials> {
         let mut data_dir = dirs::config_dir().ok_or(anyhow!("No data dir"))?;
         data_dir.push(CONFIG_DIR);
         data_dir.push(CONFIG_FILE);
 
         let config_file = data_dir.into_os_string();
+
         let config_str = config_file
             .to_str()
             .ok_or(anyhow!("Error converting dir to str"))?;
+
+        if !Path::new(config_str).exists() {
+            let creds = fallback.await?;
+            let mut file = File::create(config_str).await?;
+
+            let data = toml::to_string_pretty(&creds)?;
+
+            copy(&mut data.as_bytes(), &mut file).await?;
+        }
 
         let config = Config::builder()
             .add_source(config::File::with_name(config_str))

@@ -1,9 +1,9 @@
 use std::io;
-use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
 use anyhow::Result;
+use futures_util::FutureExt;
 use kodansha_downloader::Credentials;
 use kodansha_downloader::Volume;
 
@@ -59,6 +59,19 @@ async fn run_app<B>(terminal: &mut Terminal<B>, tick_rate: Duration) -> Result<(
 where
     B: Backend,
 {
+    let user = Credentials::from_config(
+        async {
+            let mut username: Option<String> = None;
+            let mut password: Option<String> = None;
+            loop {
+                if let (Some(username), Some(password)) = (username.clone(), password.clone()) {
+                    return Ok(Credentials::new(username, password));
+                }
+            }
+        }
+        .boxed(),
+    )
+    .await?;
     let mut last_tick = Instant::now();
     let mut state = ListState::default();
 
@@ -102,7 +115,7 @@ where
                 })
                 .collect();
 
-            let block = Block::default().title("Library").borders(Borders::ALL);
+            let block = Block::default().title("Library (L)").borders(Borders::ALL);
             let list = List::new(list_items)
                 .block(block)
                 .highlight_style(highlight_style)
@@ -119,12 +132,12 @@ where
             if let Event::Key(key) = event::read()? {
                 match key.code {
                     KeyCode::Char('q') => return Ok(()),
-                    KeyCode::Char('j') => state.select(
+                    KeyCode::Char('j') | KeyCode::Down => state.select(
                         state
                             .selected()
                             .map(|num| (num + 1) % values.iter().count()),
                     ),
-                    KeyCode::Char('k') => {
+                    KeyCode::Char('k') | KeyCode::Up => {
                         state.select(state.selected().map(|num| match num <= 0 {
                             true => values.iter().count() - 1,
                             false => num - 1,
