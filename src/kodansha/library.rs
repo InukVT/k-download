@@ -2,7 +2,7 @@ use serde::Deserialize;
 
 use crate::Volume;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct Library {
     pub volumes: Vec<Volume>,
 }

@@ -1,24 +1,25 @@
 use std::path::Path;
 
-use anyhow::anyhow;
-use config::Config;
+use anyhow::{anyhow, Ok};
+use config::{Config, FileFormat};
 use futures_util::future::BoxFuture;
-use futures_util::Future;
 use reqwest;
 use serde::{Deserialize, Serialize};
-use tokio::fs::File;
+use tokio::fs::{create_dir, File};
 use tokio::io::{copy, AsyncReadExt, AsyncWriteExt, BufWriter};
+
+use crate::Volume;
 
 use super::Library;
 
-const CONFIG_DIR: &str = ".k-download";
+const CONFIG_DIR: &str = "k-download";
 const CONFIG_FILE: &str = "config.toml";
 const TOKEN_FILE: &str = "token";
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Credentials {
     #[serde(alias = "UserName")]
-    username: String,
+    pub username: String,
     #[serde(alias = "Password")]
     password: String,
 }
@@ -27,6 +28,7 @@ pub struct Credentials {
 pub struct User {
     #[serde(alias = "access_token")]
     pub token: String,
+    library: Option<Library>,
 }
 
 impl User {
@@ -44,32 +46,31 @@ impl User {
             .unwrap()
     }
 
-    async fn persist(&self) -> anyhow::Result<()> {
-        let mut data_dir = dirs::data_dir().ok_or(anyhow!("No data dir"))?;
-        data_dir.push(CONFIG_DIR);
-        data_dir.push(TOKEN_FILE);
-
-        let token_file = data_dir.into_os_string();
-
-        let file = File::create(token_file).await?;
-        let mut writer = BufWriter::new(file);
+    async fn persist(&self, path: &str) -> anyhow::Result<()> {
+        let mut file = File::create(path).await?;
         let token = self.token.clone();
-        let buffer = token.as_bytes();
-        writer.write_all(buffer).await?;
+
+        copy(&mut token.as_bytes(), &mut file).await?;
 
         Ok(())
     }
 
-    async fn library(&self) -> anyhow::Result<Library> {
-        let library = reqwest::Client::new()
-            .get("https://api.kodansha.us/mycomics/")
-            .header("authorization", self.token.clone())
-            .send()
-            .await?
-            .json::<Library>()
-            .await?;
+    pub fn library(&self) -> Option<Library> {
+        self.library.clone()
+    }
 
-        Ok(library)
+    pub async fn load_library(&mut self) -> anyhow::Result<()> {
+        self.library = Some(Library {
+            volumes: reqwest::Client::new()
+                .get("https://api.kodansha.us/mycomics/")
+                .header("authorization", format!("Bearer {}", self.token.clone()))
+                .send()
+                .await?
+                .json::<Vec<Volume>>()
+                .await?,
+        });
+
+        Ok(())
     }
 }
 
@@ -77,11 +78,58 @@ impl Credentials {
     pub fn new(username: String, password: String) -> Credentials {
         Credentials { username, password }
     }
-    pub async fn from_config(
-        fallback: BoxFuture<'static, anyhow::Result<Credentials>>,
-    ) -> anyhow::Result<Credentials> {
+    pub async fn from_config() -> anyhow::Result<Credentials> {
+        println!("Retrieving file");
         let mut data_dir = dirs::config_dir().ok_or(anyhow!("No data dir"))?;
         data_dir.push(CONFIG_DIR);
+
+        let option_dir = data_dir.clone().into_os_string();
+        let option_str = option_dir
+            .to_str()
+            .ok_or(anyhow!("Couldn't convert options path to path"))?;
+        if !Path::new(option_str).exists() {
+            return Err(anyhow!("File doesn't exist"));
+        }
+
+        data_dir.push(CONFIG_FILE);
+
+        let config_file = data_dir.into_os_string();
+
+        let config_dir = config_file
+            .to_str()
+            .ok_or(anyhow!("Error converting dir to str"))?;
+
+        let creds = match Path::new(config_dir).exists() {
+            true => {
+                let contest = tokio::fs::read_to_string(config_dir).await?;
+
+                let creds = toml::from_str::<Credentials>(&*&contest)?;
+
+                creds
+            }
+            false => {
+                return Err(anyhow!(
+                    "Couldn't pass the file at {}, pleaser consider deleting it or edit it.",
+                    config_dir
+                ))
+            }
+        };
+
+        return Ok(dbg!(creds));
+    }
+
+    pub async fn write_user(username: String, password: String) -> anyhow::Result<Credentials> {
+        let mut data_dir = dirs::config_dir().ok_or(anyhow!("No data dir"))?;
+        data_dir.push(CONFIG_DIR);
+
+        let option_dir = data_dir.clone().into_os_string();
+        let option_str = option_dir
+            .to_str()
+            .ok_or(anyhow!("Couldn't convert options path to path"))?;
+        if !Path::new(option_str).exists() {
+            create_dir(option_str).await?;
+        }
+
         data_dir.push(CONFIG_FILE);
 
         let config_file = data_dir.into_os_string();
@@ -89,22 +137,13 @@ impl Credentials {
         let config_str = config_file
             .to_str()
             .ok_or(anyhow!("Error converting dir to str"))?;
+        let creds = Credentials { username, password };
+        let mut file = File::create(config_str).await?;
 
-        if !Path::new(config_str).exists() {
-            let creds = fallback.await?;
-            let mut file = File::create(config_str).await?;
+        let data = toml::to_string_pretty(&creds)?;
 
-            let data = toml::to_string_pretty(&creds)?;
-
-            copy(&mut data.as_bytes(), &mut file).await?;
-        }
-
-        let config = Config::builder()
-            .add_source(config::File::with_name(config_str))
-            .build()?
-            .try_deserialize::<Credentials>()?;
-
-        return Ok(config);
+        copy(&mut data.as_bytes(), &mut file).await?;
+        Ok(creds)
     }
 
     pub async fn login(self) -> anyhow::Result<User> {
@@ -113,20 +152,25 @@ impl Credentials {
         data_dir.push(TOKEN_FILE);
 
         let token_file = data_dir.into_os_string();
+        let token_path = token_file
+            .to_str()
+            .ok_or(anyhow!("Couldn't convert options path to path"))?;
 
-        match File::open(token_file).await {
-            Ok(mut file) => {
-                let mut token = String::new();
-                file.read_to_string(&mut token).await?;
-                Ok(User { token })
+        let user = if Path::new(token_path).exists() {
+            let token = tokio::fs::read_to_string(token_path).await?;
+
+            User {
+                token,
+                library: None,
             }
-            Err(_) => {
-                let user = User::new(self.username, self.password).await;
+        } else {
+            let user = User::new(self.username, self.password).await;
 
-                user.persist().await?;
+            user.persist(token_path).await?;
 
-                Ok(user)
-            }
-        }
+            user
+        };
+
+        Ok(user)
     }
 }

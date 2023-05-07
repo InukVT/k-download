@@ -13,7 +13,7 @@ use serde::Deserialize;
 use crate::kodansha::Page;
 use crate::kodansha::User;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Volume {
     pub series_name: String,
