@@ -166,19 +166,16 @@ where
             .checked_sub(last_tick.elapsed())
             .unwrap_or_else(|| Duration::from_secs(0));
 
-        let mut frame = terminal.get_frame();
         match &mut runtime_state {
             RuntimeState::NoUser(login_screen) => {
                 let credentials = Credentials::from_config().await;
                 if let Ok(credentials) = credentials {
-                    if credentials.username.chars().nth(0) == Some('\0') {
-                        return Err(anyhow!("How did we get to this?"));
-                    }
                     let mut user = credentials.login().await?;
                     user.load_library().await?;
-                    runtime_state = RuntimeState::User(user)
+                    runtime_state = RuntimeState::User(user);
+                    terminal.clear();
                 } else {
-                    login_screen.render(&mut frame);
+                    terminal.draw(|frame| login_screen.render(frame))?;
 
                     if let Some(event) = key_event {
                         login_screen.new_event(&mut normal_mode, event);
@@ -190,56 +187,58 @@ where
                 }
             }
             RuntimeState::User(user) => {
-                let chunks = Layout::default()
-                    .direction(Direction::Vertical)
-                    .margin(1)
-                    .constraints(
-                        [
-                            Constraint::Percentage(40),
-                            Constraint::Percentage(50),
-                            Constraint::Percentage(10),
-                        ]
-                        .as_ref(),
-                    )
-                    .split(frame.size());
+                terminal.draw(|frame| {
+                    let chunks = Layout::default()
+                        .direction(Direction::Vertical)
+                        .margin(1)
+                        .constraints(
+                            [
+                                Constraint::Percentage(40),
+                                Constraint::Percentage(50),
+                                Constraint::Percentage(10),
+                            ]
+                            .as_ref(),
+                        )
+                        .split(frame.size());
 
-                let styled = Style::default();
-                let highlight_style = Style::default().add_modifier(Modifier::BOLD);
-                let list_items: Vec<ListItem> = user
-                    .library()
-                    .map(|library| {
-                        library
-                            .volumes
-                            .iter()
-                            .enumerate()
-                            .map(|(index, volume)| {
-                                let span = Span::styled(
-                                    format!(
-                                        "{mark} {title}",
-                                        mark = match selected.contains(&index) {
-                                            true => "[x]",
-                                            false => "[ ]",
-                                        },
-                                        title = volume.volume_name
-                                    ),
-                                    styled.clone(),
-                                );
+                    let styled = Style::default();
+                    let highlight_style = Style::default().add_modifier(Modifier::BOLD);
+                    let list_items: Vec<ListItem> = user
+                        .library()
+                        .map(|library| {
+                            library
+                                .volumes
+                                .iter()
+                                .enumerate()
+                                .map(|(index, volume)| {
+                                    let span = Span::styled(
+                                        format!(
+                                            "{mark} {title}",
+                                            mark = match selected.contains(&index) {
+                                                true => "[x]",
+                                                false => "[ ]",
+                                            },
+                                            title = volume.volume_name
+                                        ),
+                                        styled.clone(),
+                                    );
 
-                                ListItem::new(span)
-                            })
-                            .collect()
-                    })
-                    .unwrap_or(Vec::new());
+                                    ListItem::new(span)
+                                })
+                                .collect()
+                        })
+                        .unwrap_or(Vec::new());
 
-                let block = Block::default().title("Library (L)").borders(Borders::ALL);
-                let list = List::new(list_items)
-                    .block(block)
-                    .highlight_style(highlight_style)
-                    .highlight_symbol("> ");
+                    let block = Block::default().title("Library (L)").borders(Borders::ALL);
+                    let list = List::new(list_items)
+                        .block(block)
+                        .highlight_style(highlight_style)
+                        .highlight_symbol("> ");
 
-                frame.render_stateful_widget(list, chunks[0], &mut state);
+                    frame.render_stateful_widget(list, chunks[0], &mut state);
+                })?;
             }
-        }
+        };
 
         key_event = None;
         if crossterm::event::poll(timeout)? {

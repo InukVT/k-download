@@ -115,7 +115,7 @@ impl Credentials {
             }
         };
 
-        return Ok(dbg!(creds));
+        return Ok(creds);
     }
 
     pub async fn write_user(username: String, password: String) -> anyhow::Result<Credentials> {
