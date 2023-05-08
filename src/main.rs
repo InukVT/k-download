@@ -38,9 +38,7 @@ async fn main() -> Result<()> {
     //let mut stdout = io::stdout();
     //volume.write_epub_to(&user, &mut stdout).await?;
 
-    if let Err(err) = ret {
-        print!("Error: {}", err);
-    }
+    ret?;
 
     Ok(())
 }
@@ -60,7 +58,8 @@ where
             .checked_sub(last_tick.elapsed())
             .unwrap_or_else(|| Duration::from_secs(0));
 
-        app.render(terminal).await?;
+        app.prerender().await?;
+        terminal.draw(|frame| app.render(frame))?;
 
         if crossterm::event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {

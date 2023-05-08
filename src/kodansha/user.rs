@@ -1,12 +1,10 @@
 use std::path::Path;
 
 use anyhow::{anyhow, Ok};
-use config::{Config, FileFormat};
-use futures_util::future::BoxFuture;
 use reqwest;
 use serde::{Deserialize, Serialize};
 use tokio::fs::{create_dir, File};
-use tokio::io::{copy, AsyncReadExt, AsyncWriteExt, BufWriter};
+use tokio::io::copy;
 
 use crate::Volume;
 
@@ -79,7 +77,6 @@ impl Credentials {
         Credentials { username, password }
     }
     pub async fn from_config() -> anyhow::Result<Credentials> {
-        println!("Retrieving file");
         let mut data_dir = dirs::config_dir().ok_or(anyhow!("No data dir"))?;
         data_dir.push(CONFIG_DIR);
 
