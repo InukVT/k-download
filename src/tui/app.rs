@@ -1,6 +1,6 @@
 use anyhow::Ok;
 use crossterm::event::KeyEvent;
-use tui::{backend::Backend, Frame};
+use ratatui::{backend::Backend, Frame};
 
 use crate::Credentials;
 

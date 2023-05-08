@@ -21,6 +21,6 @@ epub-builder = {git = "https://github.com/lise-henry/epub-builder.git", branch =
 anyhow = "1.0.71"
 config = "0.13.3"
 dirs = "5.0.1"
-tui = { version = "0.19.0", features = ["serde"] }
+ratatui = { version = "0.20.0", features = ["serde"] }
 crossterm = "0.26.1"
 toml = "0.7.3"

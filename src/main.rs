@@ -10,8 +10,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use k_download::tui::App;
-use tui::backend::Backend;
-use tui::{backend::CrosstermBackend, Terminal};
+use ratatui::{backend::Backend, backend::CrosstermBackend, Terminal};
 
 #[tokio::main]
 async fn main() -> Result<()> {
