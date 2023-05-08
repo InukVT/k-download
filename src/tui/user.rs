@@ -87,14 +87,14 @@ impl User {
         frame.render_stateful_widget(list, book_chunks[0], &mut self.list_state);
         frame.render_widget(selection, book_chunks[1]);
 
-        if let Some(volume) = self.user.library().and_then(|library| {
+        let block = Block::default().title("Book Info").borders(Borders::ALL);
+
+        let text: Vec<Spans> = if let Some(volume) = self.user.library().and_then(|library| {
             self.list_state
                 .selected()
                 .and_then(|index| Some(library.volumes.get(index)?.clone()))
         }) {
-            let block = Block::default().title("Book Info").borders(Borders::ALL);
-
-            let text = vec![
+            vec![
                 Spans::from(vec![Span::raw("Series:")]),
                 Spans::from(vec![Span::raw(volume.series_name)]),
                 Spans::from(vec![Span::raw("")]),
@@ -103,12 +103,14 @@ impl User {
                 Spans::from(vec![Span::raw("")]),
                 Spans::from(vec![Span::raw("Description:")]),
                 Spans::from(vec![Span::raw(volume.description)]),
-            ];
+            ]
+        } else {
+            Vec::default()
+        };
 
-            let list = Paragraph::new(text).block(block);
+        let list = Paragraph::new(text).block(block);
 
-            frame.render_widget(list, panels[1]);
-        }
+        frame.render_widget(list, panels[1]);
     }
 
     pub fn new_event(&mut self, normal_mode: &mut bool, event: KeyEvent) -> bool {
