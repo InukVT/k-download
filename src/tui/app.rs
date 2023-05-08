@@ -54,6 +54,7 @@ impl App {
     pub fn new_event(&mut self, normal_mode: &mut bool, event: KeyEvent) -> bool {
         match &mut self.state {
             State::NoUser(login_screen) => login_screen.new_event(normal_mode, event),
+            State::User(user) => user.new_event(normal_mode, event),
             _ => false,
         }
     }
