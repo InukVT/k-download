@@ -9,7 +9,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use kodansha_downloader::tui::App;
+use k_download::tui::App;
 use tui::backend::Backend;
 use tui::{backend::CrosstermBackend, Terminal};
 

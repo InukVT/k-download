@@ -2,7 +2,6 @@ use std::io;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use anyhow::anyhow;
 use anyhow::Result;
 use epub_builder::EpubBuilder;
 use epub_builder::EpubVersion;

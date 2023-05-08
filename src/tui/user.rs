@@ -148,7 +148,7 @@ impl User {
 
 impl From<crate::User> for User {
     fn from(user: crate::User) -> Self {
-        let mut list_state = ListState::default();
+        let list_state = ListState::default();
         User {
             selected: Vec::new(),
             list_state,
