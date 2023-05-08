@@ -87,7 +87,7 @@ impl User {
                 Spans::from(vec![Span::raw(volume.description)]),
             ];
 
-            let list = Paragraph::new("Hello World").block(block);
+            let list = Paragraph::new(text).block(block);
 
             frame.render_widget(list, panels[1]);
         }
