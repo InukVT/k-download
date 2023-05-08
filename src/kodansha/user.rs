@@ -31,11 +31,11 @@ pub struct User {
 
 impl User {
     pub async fn new(username: String, password: String) -> User {
-        let mut creds = Credentials { username, password };
+        let creds = Credentials { username, password };
 
         reqwest::Client::new()
             .post("https://api.kodansha.us/account/token")
-            .json(&mut creds)
+            .json(&creds)
             .send()
             .await
             .unwrap()
@@ -100,9 +100,7 @@ impl Credentials {
             true => {
                 let contest = tokio::fs::read_to_string(config_dir).await?;
 
-                let creds = toml::from_str::<Credentials>(&*&contest)?;
-
-                creds
+                toml::from_str::<Credentials>(&contest)?
             }
             false => {
                 return Err(anyhow!(
@@ -112,7 +110,7 @@ impl Credentials {
             }
         };
 
-        return Ok(creds);
+        Ok(creds)
     }
 
     pub async fn write_user(username: String, password: String) -> anyhow::Result<Credentials> {

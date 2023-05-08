@@ -51,7 +51,7 @@ where
 
     let mut normal_mode = true;
 
-    let mut app = App::new();
+    let mut app = App::default();
 
     loop {
         let timeout = tick_rate

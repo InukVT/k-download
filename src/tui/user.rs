@@ -46,7 +46,7 @@ impl User {
                                 },
                                 title = volume.volume_name
                             ),
-                            styled.clone(),
+                            styled,
                         );
 
                         ListItem::new(span)
@@ -63,17 +63,11 @@ impl User {
 
         frame.render_stateful_widget(list, panels[0], &mut self.list_state);
 
-        if let Some(volume) = self
-            .user
-            .library()
-            .map(|library| {
-                let index = self.list_state.selected()?;
-
-                let volume = library.volumes.get(index).map(|v| v.clone());
-                return volume;
-            })
-            .flatten()
-        {
+        if let Some(volume) = self.user.library().and_then(|library| {
+            self.list_state
+                .selected()
+                .and_then(|index| Some(library.volumes.get(index)?.clone()))
+        }) {
             let block = Block::default().title("Book Info").borders(Borders::ALL);
 
             let text = vec![
@@ -106,7 +100,7 @@ impl User {
                     (self.user.library(), self.list_state.selected())
                 {
                     let volumes = library.volumes;
-                    let count = volumes.iter().count();
+                    let count = volumes.len();
                     let new_selection = selected + 1;
                     self.list_state.select(Some(new_selection % count));
                 } else if let (Some(_), None) = (self.user.library(), self.list_state.selected()) {
@@ -120,7 +114,7 @@ impl User {
                     (self.user.library(), self.list_state.selected())
                 {
                     let volumes = library.volumes;
-                    let count = volumes.iter().count();
+                    let count = volumes.len();
                     let new_selection = if selected >= 1 {
                         selected - 1
                     } else {

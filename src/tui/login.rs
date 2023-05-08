@@ -49,7 +49,7 @@ impl LoginScreen {
         let username = self.username.clone();
         let password = self.password.clone();
 
-        return Some(Credentials::new(username, password));
+        Some(Credentials::new(username, password))
     }
 
     pub fn new_event(&mut self, normal_mode: &mut bool, event: KeyEvent) -> bool {
@@ -79,7 +79,8 @@ impl LoginScreen {
             (KeyCode::Enter, State::Normal) => self.submit = true,
             _ => return false,
         };
-        return true;
+
+        true
     }
 }
 

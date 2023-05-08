@@ -59,7 +59,7 @@ impl Volume {
 
         let builder = Arc::new(Mutex::new(builder));
 
-        let mut pages = join_all(self.page_links(&user).await.map(|(page_number, page)| {
+        let mut pages = join_all(self.page_links(user).await.map(|(page_number, page)| {
             let user = user.clone();
             let builder = builder.clone();
             tokio::spawn(async move {

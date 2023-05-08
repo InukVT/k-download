@@ -54,7 +54,7 @@ impl Page {
         page_number: usize,
         builder: Arc<Mutex<EpubBuilder<ZipLibrary>>>,
         user: &User,
-    ) -> Result<Box<dyn FnOnce() -> () + Send + 'static>> {
+    ) -> Result<Box<dyn FnOnce() + Send + 'static>> {
         let (file_name, title, reference_type) = match page_number {
             0 => (
                 "cover.jpeg".to_string(),
@@ -73,7 +73,7 @@ impl Page {
         let page_path = format!("page-{}.xhtml", page_number);
 
         sleep(Duration::from_millis(10 * page_number as u64)).await;
-        let stream = self.stream(&user).await?;
+        let stream = self.stream(user).await?;
 
         {
             let mut builder = builder.lock().unwrap();

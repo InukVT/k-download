@@ -15,13 +15,15 @@ enum State {
     NoUser(LoginScreen),
 }
 
-impl App {
-    pub fn new() -> App {
+impl Default for App {
+    fn default() -> App {
         App {
             state: State::NoUser(LoginScreen::default()),
         }
     }
+}
 
+impl App {
     pub async fn prerender(&mut self) -> anyhow::Result<()> {
         if let State::NoUser(login_screen) = &mut self.state {
             match Credentials::from_config().await {
@@ -41,7 +43,7 @@ impl App {
         Ok(())
     }
 
-    pub fn render<'a, B>(&mut self, frame: &mut Frame<'a, B>)
+    pub fn render<B>(&mut self, frame: &mut Frame<B>)
     where
         B: Backend,
     {
