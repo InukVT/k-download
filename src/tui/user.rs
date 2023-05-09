@@ -27,7 +27,6 @@ impl User {
             .split(frame.size());
 
         let styled = Style::default();
-        let highlight_style = Style::default().add_modifier(Modifier::BOLD);
 
         let library = self.user.library().unwrap_or_default();
 
@@ -64,6 +63,8 @@ impl User {
                 ListItem::new(span)
             })
             .collect();
+
+        let highlight_style = Style::default().add_modifier(Modifier::BOLD);
 
         let block = Block::default().title("Library (L)").borders(Borders::ALL);
         let list = List::new(list_items)
