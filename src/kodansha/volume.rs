@@ -14,9 +14,9 @@ use crate::kodansha::User;
 
 #[derive(Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct Volume {
+pub struct Volume<VolumeName = String> {
     pub series_name: String,
-    pub volume_name: String,
+    pub volume_name: VolumeName,
     pub volume_number: u8,
     pub page_count: u16,
     pub description: String,

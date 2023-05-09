@@ -8,6 +8,7 @@ use tokio::io::copy;
 
 use crate::Volume;
 
+use super::library::LibraryItem;
 use super::Library;
 
 const CONFIG_DIR: &str = "k-download";
@@ -64,8 +65,23 @@ impl User {
                 .header("authorization", format!("Bearer {}", self.token.clone()))
                 .send()
                 .await?
-                .json::<Vec<Volume>>()
-                .await?,
+                .json::<Vec<Volume<Option<String>>>>()
+                .await?
+                .into_iter()
+                // Filters away chapters
+                .filter_map(|volume| match volume.volume_name {
+                    Some(volume_name) => Some(Volume {
+                        series_name: volume.series_name,
+                        volume_name,
+                        volume_number: volume.volume_number,
+                        page_count: volume.page_count,
+                        description: volume.description,
+                        id: volume.id,
+                    }),
+
+                    None => None,
+                })
+                .collect(),
         });
 
         Ok(())

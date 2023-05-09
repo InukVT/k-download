@@ -8,6 +8,8 @@ use ratatui::{
     Frame,
 };
 
+use crate::kodansha::library::LibraryItem;
+
 pub struct User {
     selected: Vec<usize>,
     list_state: ListState,
