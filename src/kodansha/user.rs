@@ -8,7 +8,6 @@ use tokio::io::copy;
 
 use crate::Volume;
 
-use super::library::LibraryItem;
 use super::Library;
 
 const CONFIG_DIR: &str = "k-download";
