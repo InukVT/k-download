@@ -57,6 +57,13 @@ impl User {
         self.library.clone()
     }
 
+    pub async fn download_dir(&self) -> Option<String> {
+        None
+    }
+
+    pub async fn set_download_dir(&mut self) -> anyhow::Result<()> {
+        Ok(())
+    }
     pub async fn load_library(&mut self) -> anyhow::Result<()> {
         self.library = Some(Library {
             volumes: reqwest::Client::new()

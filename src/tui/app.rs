@@ -25,8 +25,8 @@ impl Default for App {
 
 impl App {
     pub async fn prerender(&mut self) -> anyhow::Result<()> {
-        if let State::NoUser(login_screen) = &mut self.state {
-            match Credentials::from_config().await {
+        match &mut self.state {
+            State::NoUser(login_screen) => match Credentials::from_config().await {
                 Result::Ok(credentials) => {
                     let mut user = credentials.login().await?;
                     user.load_library().await?;
@@ -37,7 +37,8 @@ impl App {
                         self.state = State::User(credentials.login().await?.into())
                     };
                 }
-            }
+            },
+            State::User(user_screen) => user_screen.prerender().await?,
         }
 
         Ok(())

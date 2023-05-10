@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Modifier, Style},
     text::{Span, Spans},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Frame,
 };
 
@@ -12,7 +12,16 @@ pub struct User {
     selected: Vec<usize>,
     list_state: ListState,
     user: crate::User,
-    highlight_mode: bool,
+    mode: Mode,
+}
+
+#[derive(Default)]
+enum Mode {
+    #[default]
+    Normal,
+    Highlight,
+    RequestDir,
+    Dir(Option<String>),
 }
 
 impl User {
@@ -22,7 +31,6 @@ impl User {
     {
         let panels = Layout::default()
             .direction(Direction::Horizontal)
-            .margin(1)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref())
             .split(frame.size());
 
@@ -90,39 +98,87 @@ impl User {
 
         let block = Block::default().title("Book Info").borders(Borders::ALL);
 
-        let text: Vec<Spans> = if let Some(volume) = self.user.library().and_then(|library| {
+        let text: Vec<Spans> = match self.user.library().and_then(|library| {
             self.list_state
                 .selected()
                 .and_then(|index| Some(library.volumes.get(index)?.clone()))
         }) {
-            vec![
-                Spans::from(vec![Span::raw("Series:")]),
-                Spans::from(vec![Span::raw(volume.series_name)]),
-                Spans::from(vec![Span::raw("")]),
-                Spans::from(vec![Span::raw("Volume:")]),
-                Spans::from(vec![Span::raw(volume.volume_name)]),
-                Spans::from(vec![Span::raw("")]),
-                Spans::from(vec![Span::raw("Description:")]),
-                Spans::from(vec![Span::raw(volume.description)]),
-            ]
-        } else {
-            Vec::default()
+            Some(volume) => {
+                let mut description = {
+                    let escaped = html_escape::decode_html_entities(volume.description.as_str());
+
+                    let description: Vec<Spans> = escaped
+                        .replace("\r", "")
+                        .split("\n")
+                        .map(|line| if line == " " { "" } else { line })
+                        .map(|line| line.to_owned())
+                        // Removes consecutive duplicates
+                        .fold(vec![], |mut submitted, line| {
+                            let prev = submitted.last().map(|item: &String| item.to_owned());
+                            let matches = prev.map(|prev| prev == line).unwrap_or(false);
+
+                            if !matches {
+                                submitted.push(line);
+                            }
+
+                            submitted
+                        })
+                        .iter()
+                        .map(|line| Spans::from(vec![Span::raw(line.to_owned())]))
+                        .collect();
+
+                    description
+                };
+
+                let mut ret = vec![
+                    Spans::from(vec![Span::raw("Series:")]),
+                    Spans::from(vec![Span::raw(volume.series_name)]),
+                    Spans::from(vec![Span::raw("")]),
+                    Spans::from(vec![Span::raw("Volume:")]),
+                    Spans::from(vec![Span::raw(volume.volume_name)]),
+                    Spans::from(vec![Span::raw("")]),
+                    Spans::from(vec![Span::raw("Description:")]),
+                ];
+
+                ret.append(&mut description);
+
+                ret
+            }
+            None => Vec::default(),
         };
 
-        let list = Paragraph::new(text).block(block);
+        let list = Paragraph::new(text).block(block).wrap(Wrap { trim: true });
 
         frame.render_widget(list, panels[1]);
     }
 
+    pub async fn prerender(&mut self) -> anyhow::Result<()> {
+        match &mut self.mode {
+            Mode::RequestDir => self.mode = Mode::Dir(self.user.download_dir().await),
+            Mode::Dir(path) => match path {
+                Some(_path) => todo!(),
+                None => todo!(),
+            },
+            _ => {}
+        }
+
+        Ok(())
+    }
+
     pub fn new_event(&mut self, normal_mode: &mut bool, event: KeyEvent) -> bool {
-        match (&mut self.highlight_mode, event.code) {
-            (false, KeyCode::Char('l')) => {
+        match (&mut self.mode, event.code) {
+            (Mode::Normal, KeyCode::Char('l')) => {
                 self.list_state.select(Some(0));
                 *normal_mode = false;
-                self.highlight_mode = true;
+                self.mode = Mode::Highlight;
                 true
             }
-            (true, KeyCode::Char('j') | KeyCode::Down) => {
+            (Mode::Normal, KeyCode::Char('d')) => {
+                self.mode = Mode::RequestDir;
+
+                true
+            }
+            (Mode::Highlight, KeyCode::Char('j') | KeyCode::Down) => {
                 if let (Some(library), Some(selected)) =
                     (self.user.library(), self.list_state.selected())
                 {
@@ -136,7 +192,7 @@ impl User {
 
                 true
             }
-            (true, KeyCode::Char('k') | KeyCode::Up) => {
+            (Mode::Highlight, KeyCode::Char('k') | KeyCode::Up) => {
                 if let (Some(library), Some(selected)) =
                     (self.user.library(), self.list_state.selected())
                 {
@@ -154,14 +210,17 @@ impl User {
 
                 true
             }
-            (true, KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('l')) => {
+            (
+                Mode::Highlight | Mode::Dir(_),
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('l'),
+            ) => {
                 self.list_state.select(None);
-                self.highlight_mode = false;
+                self.mode = Mode::Normal;
                 *normal_mode = true;
 
                 true
             }
-            (true, KeyCode::Char(' ') | KeyCode::Char('a')) => {
+            (Mode::Highlight, KeyCode::Char(' ') | KeyCode::Char('a')) => {
                 if let Some(selected) = self.list_state.selected() {
                     if self.selected.contains(&selected) {
                         let index = self.selected.iter().position(|x| *x == selected).unwrap();
@@ -186,7 +245,7 @@ impl From<crate::User> for User {
             selected: Vec::new(),
             list_state,
             user,
-            highlight_mode: false,
+            mode: Mode::default(),
         }
     }
 }

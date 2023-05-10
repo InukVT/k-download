@@ -906,6 +906,7 @@ dependencies = [
  "epub-builder",
  "futures 0.3.28",
  "futures-util",
+ "html-escape",
  "ratatui",
  "reqwest",
  "serde",

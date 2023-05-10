@@ -24,3 +24,4 @@ dirs = "5.0.1"
 ratatui = { version = "0.20.0", features = ["serde"] }
 crossterm = "0.26.1"
 toml = "0.7.3"
+html-escape = "0.2.13"
