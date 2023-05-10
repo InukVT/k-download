@@ -115,7 +115,7 @@ impl User {
                         .map(|line| if line == " " { "" } else { line })
                         .map(|line| line.to_owned())
                         .dedup()
-                        .map(|line| Spans::from(vec![Span::raw(line.to_owned())]))
+                        .map(|line| Spans::from(vec![Span::raw(line)]))
                         .collect();
 
                     description

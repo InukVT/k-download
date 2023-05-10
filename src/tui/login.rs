@@ -16,8 +16,9 @@ pub struct LoginScreen {
     state: State,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 enum State {
+    #[default]
     Normal,
     Username,
     Password,
@@ -81,11 +82,5 @@ impl LoginScreen {
         };
 
         true
-    }
-}
-
-impl Default for State {
-    fn default() -> Self {
-        State::Normal
     }
 }
