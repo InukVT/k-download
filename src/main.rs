@@ -30,12 +30,6 @@ async fn main() -> Result<()> {
         DisableMouseCapture
     )?;
     terminal.show_cursor()?;
-    //let user = Credentials::from_config()?.login().await?;
-
-    //let volume = Volume::get(10).await?;
-
-    //let mut stdout = io::stdout();
-    //volume.write_epub_to(&user, &mut stdout).await?;
 
     ret?;
 
