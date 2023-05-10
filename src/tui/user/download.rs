@@ -64,28 +64,31 @@ impl Download {
     where
         B: Backend,
     {
-        let library = self.library.lock().unwrap();
-        let selected = self.selected.lock().unwrap();
-        let styled = Style::default();
-        let selected_items: Vec<ListItem> = library
-            .clone()
-            .unwrap_or_default()
-            .volumes
-            .iter()
-            .enumerate()
-            .filter_map(|(index, volume)| {
-                if selected.contains(&index) {
-                    Some(volume.clone())
-                } else {
-                    None
-                }
-            })
-            .map(|volume| {
-                let span = Span::styled(volume.volume_name, styled);
+        let selected_items: Vec<ListItem> = {
+            let library = self.library.lock().unwrap();
+            let selected = self.selected.lock().unwrap();
+            let styled = Style::default();
 
-                ListItem::new(span)
-            })
-            .collect();
+            library
+                .clone()
+                .unwrap_or_default()
+                .volumes
+                .iter()
+                .enumerate()
+                .filter_map(|(index, volume)| {
+                    if selected.contains(&index) {
+                        Some(volume.clone())
+                    } else {
+                        None
+                    }
+                })
+                .map(|volume| {
+                    let span = Span::styled(volume.volume_name, styled);
+
+                    ListItem::new(span)
+                })
+                .collect()
+        };
 
         let block = Block::default()
             .title("To Download (D)")
