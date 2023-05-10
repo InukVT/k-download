@@ -1,3 +1,5 @@
+use std::{rc::Rc, sync::Mutex};
+
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     backend::Backend,
@@ -10,10 +12,13 @@ use ratatui::{
 
 use crate::utils::ToDedup;
 
+use super::Download;
+
 pub struct User {
-    selected: Vec<usize>,
+    selected: Rc<Mutex<Vec<usize>>>,
     list_state: ListState,
     user: crate::User,
+    download_tab: Download,
     mode: Mode,
 }
 
@@ -22,11 +27,17 @@ enum Mode {
     #[default]
     Normal,
     Highlight,
-    RequestDir,
-    Dir(Option<String>),
+    Download,
 }
 
 impl User {
+    pub async fn prerender(&mut self) -> anyhow::Result<()> {
+        match self.mode {
+            Mode::Download => self.download_tab.prerender().await,
+            _ => Ok(()),
+        }
+    }
+
     pub fn render<B>(&mut self, frame: &mut Frame<B>)
     where
         B: Backend,
@@ -38,54 +49,40 @@ impl User {
 
         let styled = Style::default();
 
-        let library = self.user.library().unwrap_or_default();
+        let list_items: Vec<ListItem> = {
+            let selected = self.selected.lock().unwrap();
 
-        let list_items: Vec<ListItem> = library
-            .clone()
-            .volumes
-            .iter()
-            .enumerate()
-            .map(|(index, volume)| {
-                let span = Span::styled(
-                    format!(
-                        "{mark} {title}",
-                        mark = match self.selected.contains(&index) {
-                            true => "[x]",
-                            false => "[ ]",
-                        },
-                        title = volume.volume_name
-                    ),
-                    styled,
-                );
+            let library = self.user.library();
+            let library = library.lock().unwrap();
+            let library = library.clone().unwrap_or_default();
 
-                ListItem::new(span)
-            })
-            .collect();
+            library
+                .clone()
+                .volumes
+                .iter()
+                .enumerate()
+                .map(|(index, volume)| {
+                    let span = Span::styled(
+                        format!(
+                            "{mark} {title}",
+                            mark = match selected.contains(&index) {
+                                true => "[x]",
+                                false => "[ ]",
+                            },
+                            title = volume.volume_name
+                        ),
+                        styled,
+                    );
 
-        let selected_items: Vec<ListItem> = library
-            .volumes
-            .iter()
-            .enumerate()
-            .filter(|(index, _volume)| self.selected.contains(index))
-            .map(|(_index, volume)| {
-                let span = Span::styled(volume.volume_name.clone(), styled);
-
-                ListItem::new(span)
-            })
-            .collect();
+                    ListItem::new(span)
+                })
+                .collect()
+        };
 
         let highlight_style = Style::default().add_modifier(Modifier::BOLD);
 
         let block = Block::default().title("Library (L)").borders(Borders::ALL);
         let list = List::new(list_items)
-            .block(block)
-            .highlight_style(highlight_style)
-            .highlight_symbol("> ");
-
-        let block = Block::default()
-            .title("To Download (D)")
-            .borders(Borders::ALL);
-        let selection = List::new(selected_items)
             .block(block)
             .highlight_style(highlight_style)
             .highlight_symbol("> ");
@@ -96,14 +93,18 @@ impl User {
             .split(panels[0]);
 
         frame.render_stateful_widget(list, book_chunks[0], &mut self.list_state);
-        frame.render_widget(selection, book_chunks[1]);
+        self.download_tab.render(frame, book_chunks[1]);
 
         let block = Block::default().title("Book Info").borders(Borders::ALL);
 
-        let text: Vec<Spans> = match self.user.library().and_then(|library| {
-            self.list_state
-                .selected()
-                .and_then(|index| Some(library.volumes.get(index)?.clone()))
+        let library = self.user.library();
+        let library = library.lock();
+        let text: Vec<Spans> = match library.ok().and_then(|library| {
+            library.clone().and_then(|library| {
+                self.list_state
+                    .selected()
+                    .and_then(|index| Some(library.volumes.get(index)?.clone()))
+            })
         }) {
             Some(volume) => {
                 let mut description = {
@@ -143,20 +144,9 @@ impl User {
         frame.render_widget(list, panels[1]);
     }
 
-    pub async fn prerender(&mut self) -> anyhow::Result<()> {
-        match &mut self.mode {
-            Mode::RequestDir => self.mode = Mode::Dir(self.user.download_dir().await),
-            Mode::Dir(path) => match path {
-                Some(_path) => todo!(),
-                None => todo!(),
-            },
-            _ => {}
-        }
-
-        Ok(())
-    }
-
     pub fn new_event(&mut self, normal_mode: &mut bool, event: KeyEvent) -> bool {
+        let library = self.user.library();
+        let library = library.lock().unwrap();
         match (&mut self.mode, event.code) {
             (Mode::Normal, KeyCode::Char('l')) => {
                 self.list_state.select(Some(0));
@@ -165,44 +155,48 @@ impl User {
                 true
             }
             (Mode::Normal, KeyCode::Char('d')) => {
-                self.mode = Mode::RequestDir;
+                self.mode = Mode::Download;
+                self.download_tab.new_event(normal_mode, event);
 
                 true
             }
             (Mode::Highlight, KeyCode::Char('j') | KeyCode::Down) => {
-                if let (Some(library), Some(selected)) =
-                    (self.user.library(), self.list_state.selected())
-                {
-                    let volumes = library.volumes;
-                    let count = volumes.len();
-                    let new_selection = selected + 1;
-                    self.list_state.select(Some(new_selection % count));
-                } else if let (Some(_), None) = (self.user.library(), self.list_state.selected()) {
-                    self.list_state.select(Some(0));
+                match (Option::as_ref(&library), self.list_state.selected()) {
+                    (Some(library), Some(selected)) => {
+                        let volumes = library.volumes.clone();
+                        let count = volumes.len();
+                        let new_selection = selected + 1;
+                        self.list_state.select(Some(new_selection % count));
+                    }
+                    (Some(_), None) => {
+                        self.list_state.select(Some(0));
+                    }
+                    _ => (),
                 };
 
                 true
             }
             (Mode::Highlight, KeyCode::Char('k') | KeyCode::Up) => {
-                if let (Some(library), Some(selected)) =
-                    (self.user.library(), self.list_state.selected())
-                {
-                    let volumes = library.volumes;
-                    let count = volumes.len();
-                    let new_selection = if selected >= 1 {
-                        selected - 1
-                    } else {
-                        count - 1
-                    };
-                    self.list_state.select(Some(new_selection));
-                } else if let (Some(_), None) = (self.user.library(), self.list_state.selected()) {
-                    self.list_state.select(Some(0));
+                match (Option::as_ref(&library), self.list_state.selected()) {
+                    (Some(library), Some(selected)) => {
+                        let volumes = library.volumes.clone();
+                        let count = volumes.len();
+                        let new_selection = if selected >= 1 {
+                            selected - 1
+                        } else {
+                            count - 1
+                        };
+                        self.list_state.select(Some(new_selection));
+                    }
+                    (Some(_), None) => {
+                        self.list_state.select(Some(0));
+                    }
+                    _ => (),
                 };
-
                 true
             }
             (
-                Mode::Highlight | Mode::Dir(_),
+                Mode::Highlight | Mode::Download,
                 KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('l'),
             ) => {
                 self.list_state.select(None);
@@ -212,19 +206,20 @@ impl User {
                 true
             }
             (Mode::Highlight, KeyCode::Char(' ') | KeyCode::Char('a')) => {
+                let mut selected_item = self.selected.lock().unwrap();
                 if let Some(selected) = self.list_state.selected() {
-                    if self.selected.contains(&selected) {
-                        let index = self.selected.iter().position(|x| *x == selected).unwrap();
-                        self.selected.remove(index);
+                    if selected_item.contains(&selected) {
+                        let index = selected_item.iter().position(|x| *x == selected).unwrap();
+                        selected_item.remove(index);
                     } else {
-                        self.selected.push(selected);
+                        selected_item.push(selected);
                     }
                 }
 
                 true
             }
 
-            _ => false,
+            _ => self.download_tab.new_event(normal_mode, event),
         }
     }
 }
@@ -232,11 +227,17 @@ impl User {
 impl From<crate::User> for User {
     fn from(user: crate::User) -> Self {
         let list_state = ListState::default();
+
+        let library = user.library();
+        let download_tab = Download::new(library.clone(), Rc::default());
+        let selected = download_tab.get_selections();
+
         User {
-            selected: Vec::new(),
+            selected,
             list_state,
             user,
             mode: Mode::default(),
+            download_tab,
         }
     }
 }

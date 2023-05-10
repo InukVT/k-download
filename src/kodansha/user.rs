@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Ok};
 use reqwest;
@@ -8,7 +9,7 @@ use tokio::io::copy;
 
 use crate::Volume;
 
-use super::Library;
+use super::{library, Library};
 
 const CONFIG_DIR: &str = "k-download";
 const CONFIG_FILE: &str = "config.toml";
@@ -22,11 +23,16 @@ pub struct Credentials {
     password: String,
 }
 
-#[derive(Deserialize, Clone)]
-pub struct User {
+#[derive(Deserialize)]
+struct KodanshaUser {
     #[serde(alias = "access_token")]
     pub token: String,
-    library: Option<Library>,
+}
+
+#[derive(Clone)]
+pub struct User {
+    pub token: String,
+    library: Arc<Mutex<Option<Library>>>,
 }
 
 impl User {
@@ -39,9 +45,10 @@ impl User {
             .send()
             .await
             .unwrap()
-            .json::<User>()
+            .json::<KodanshaUser>()
             .await
             .unwrap()
+            .into()
     }
 
     async fn persist(&self, path: &str) -> anyhow::Result<()> {
@@ -53,44 +60,51 @@ impl User {
         Ok(())
     }
 
-    pub fn library(&self) -> Option<Library> {
+    pub fn library(&self) -> Arc<Mutex<Option<Library>>> {
         self.library.clone()
     }
 
-    pub async fn download_dir(&self) -> Option<String> {
-        None
-    }
-
-    pub async fn set_download_dir(&mut self) -> anyhow::Result<()> {
-        Ok(())
-    }
     pub async fn load_library(&mut self) -> anyhow::Result<()> {
-        self.library = Some(Library {
-            volumes: reqwest::Client::new()
-                .get("https://api.kodansha.us/mycomics/")
-                .header("authorization", format!("Bearer {}", self.token.clone()))
-                .send()
-                .await?
-                .json::<Vec<Volume<Option<String>>>>()
-                .await?
-                .into_iter()
-                // Filters away chapters
-                .filter_map(|volume| match volume.volume_name {
-                    Some(volume_name) => Some(Volume {
-                        series_name: volume.series_name,
-                        volume_name,
-                        volume_number: volume.volume_number,
-                        page_count: volume.page_count,
-                        description: volume.description,
-                        id: volume.id,
-                    }),
+        match self.library.lock() {
+            Result::Ok(mut library) => {
+                *library = Some(Library {
+                    volumes: reqwest::Client::new()
+                        .get("https://api.kodansha.us/mycomics/")
+                        .header("authorization", format!("Bearer {}", self.token.clone()))
+                        .send()
+                        .await?
+                        .json::<Vec<Volume<Option<String>>>>()
+                        .await?
+                        .into_iter()
+                        // Filters away chapters
+                        .filter_map(|volume| match volume.volume_name {
+                            Some(volume_name) => Some(Volume {
+                                series_name: volume.series_name,
+                                volume_name,
+                                volume_number: volume.volume_number,
+                                page_count: volume.page_count,
+                                description: volume.description,
+                                id: volume.id,
+                            }),
 
-                    None => None,
-                })
-                .collect(),
-        });
+                            None => None,
+                        })
+                        .collect(),
+                });
 
-        Ok(())
+                Ok(())
+            }
+            Err(err) => Result::Err(anyhow!("Couldn't read the mutex")),
+        }
+    }
+}
+
+impl From<KodanshaUser> for User {
+    fn from(value: KodanshaUser) -> Self {
+        Self {
+            token: value.token,
+            library: Arc::default(),
+        }
     }
 }
 
@@ -178,7 +192,7 @@ impl Credentials {
 
             User {
                 token,
-                library: None,
+                library: Arc::default(),
             }
         } else {
             let user = User::new(self.username, self.password).await;
