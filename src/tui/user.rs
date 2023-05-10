@@ -24,6 +24,11 @@ enum Mode {
     Dir(Option<String>),
 }
 
+struct Dedup<Iter, Item> {
+    prev: Item,
+    iter: Iter,
+}
+
 impl User {
     pub fn render<B>(&mut self, frame: &mut Frame<B>)
     where
@@ -112,18 +117,7 @@ impl User {
                         .split('\n')
                         .map(|line| if line == " " { "" } else { line })
                         .map(|line| line.to_owned())
-                        // Removes consecutive duplicates
-                        .fold(vec![], |mut submitted, line| {
-                            let prev = submitted.last().map(|item: &String| item.to_owned());
-                            let matches = prev.map(|prev| prev == line).unwrap_or(false);
-
-                            if !matches {
-                                submitted.push(line);
-                            }
-
-                            submitted
-                        })
-                        .iter()
+                        .dedup()
                         .map(|line| Spans::from(vec![Span::raw(line.to_owned())]))
                         .collect();
 
@@ -247,5 +241,61 @@ impl From<crate::User> for User {
             user,
             mode: Mode::default(),
         }
+    }
+}
+
+impl<Iter, Item> Dedup<Iter, Item>
+where
+    Item: Default,
+{
+    fn new(iter: Iter) -> Dedup<Iter, Item> {
+        Dedup {
+            prev: Item::default(),
+            iter,
+        }
+    }
+}
+
+impl<Iter, Item> Iterator for Dedup<Iter, Item>
+where
+    Item: PartialEq,
+    Item: ToOwned<Owned = Item>,
+    Iter: Iterator<Item = Item>,
+{
+    type Item = Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.find(|current| match *current != self.prev {
+            true => {
+                self.prev = current.to_owned();
+                true
+            }
+            false => false,
+        })
+    }
+}
+
+trait ToDedup {
+    type Item;
+
+    fn dedup(self) -> Dedup<Self, Self::Item>
+    where
+        Self: Sized;
+}
+
+impl<Iter, Item> ToDedup for Iter
+where
+    Item: Default,
+    Item: PartialEq,
+    Item: ToOwned<Owned = Item>,
+    Iter: Iterator<Item = Item>,
+{
+    type Item = Iter::Item;
+
+    fn dedup(self) -> Dedup<Self, Self::Item>
+    where
+        Self: Sized,
+    {
+        Dedup::new(self)
     }
 }
