@@ -108,8 +108,8 @@ impl User {
                     let escaped = html_escape::decode_html_entities(volume.description.as_str());
 
                     let description: Vec<Spans> = escaped
-                        .replace("\r", "")
-                        .split("\n")
+                        .replace('\r', "")
+                        .split('\n')
                         .map(|line| if line == " " { "" } else { line })
                         .map(|line| line.to_owned())
                         // Removes consecutive duplicates
