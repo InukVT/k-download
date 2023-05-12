@@ -5,6 +5,7 @@ use ratatui::{
     widgets::ListItem,
 };
 
+#[derive(Clone)]
 pub struct Tree {
     path: PathBuf,
     children: Option<Vec<Tree>>,
@@ -22,6 +23,10 @@ impl Tree {
 
     pub fn set_children(&mut self, children: Vec<Tree>) {
         self.children = Some(children);
+    }
+
+    pub fn set_children_optional(&mut self, children: Option<Vec<Tree>>) {
+        self.children = children;
     }
 
     pub fn list_items(&self) -> Option<Vec<(ListItem, PathBuf)>> {
@@ -60,12 +65,34 @@ impl Tree {
         Some(spans)
     }
 
-    pub fn open(&mut self) {
-        self.open = true;
+    pub fn get(&mut self, index: &mut usize) -> Option<&mut Self> {
+        if !self.path.is_dir() {
+            return None;
+        }
+
+        if *index == 0 {
+            return Some(self);
+        }
+
+        *index -= 1;
+
+        if let (Some(children), true) = (&mut self.children, self.open) {
+            for child in children.iter_mut() {
+                if let Some(node) = child.get(index) {
+                    return Some(node);
+                }
+            }
+        }
+
+        None
     }
 
-    pub fn close(&mut self) {
-        self.open = false;
+    pub fn toggl(&mut self) {
+        self.open = !self.open;
+    }
+
+    pub fn open(&mut self) {
+        self.open = true;
     }
 
     pub fn path(&self) -> &PathBuf {

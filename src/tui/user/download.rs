@@ -7,22 +7,29 @@ use std::{
 };
 
 use crossterm::event::{KeyCode, KeyEvent};
+use futures_util::future::join_all;
 use ratatui::{
     backend::Backend,
-    layout::Rect,
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::Span,
     widgets::{Block, Borders, List, ListItem, ListState},
     Frame,
 };
+use tokio::{
+    fs::{try_exists, File},
+    io::AsyncWriteExt,
+    time::{sleep, Duration},
+};
 
-use crate::{kodansha::Library, tui::tree::Tree};
+use crate::{kodansha::Library, tui::tree::Tree, User, Volume};
 
 pub struct Download {
     mode: Mode,
     url: Option<PathBuf>,
+    new_url: Option<PathBuf>,
     library: Arc<Mutex<Option<Library>>>,
-    selected: Rc<Mutex<Vec<usize>>>,
+    selected: Arc<Mutex<Vec<usize>>>,
 }
 
 #[derive(Default)]
@@ -34,69 +41,149 @@ enum Mode {
 }
 
 impl Download {
-    pub fn new(library: Arc<Mutex<Option<Library>>>, selected: Rc<Mutex<Vec<usize>>>) -> Self {
+    pub fn new(library: Arc<Mutex<Option<Library>>>, selected: Arc<Mutex<Vec<usize>>>) -> Self {
         Download {
             mode: Mode::default(),
             url: None,
+            new_url: None,
             library,
             selected,
         }
     }
 
-    pub async fn prerender(&mut self) -> anyhow::Result<()> {
+    pub async fn prerender(&mut self, user: &User) -> anyhow::Result<()> {
+        if let Some(new_url) = &mut self.new_url {
+            let new_url = new_url.to_owned();
+            self.new_url = None;
+            set_download_dir(new_url.as_ref()).await?;
+            self.url = Some(new_url);
+        }
+
         match &self.mode {
             Mode::Download => {
-                if self.url.is_none() {
-                    let dest = download_dir().await;
+                match &self.url {
+                    None => {
+                        let dest = download_dir().await;
 
-                    match dest {
-                        Some(dest) => self.url = Some(dest),
-                        None => {
-                            let path = current_dir()?;
-                            self.url = Some(path.clone());
+                        match dest {
+                            Some(dest) => self.url = Some(dest),
+                            None => {
+                                let path = current_dir()?;
+                                self.url = Some(path.clone());
 
-                            set_download_dir(&path).await?;
+                                set_download_dir(&path).await?;
 
-                            self.url = Some(path.clone());
+                                self.url = Some(path.clone());
 
-                            let tree: Option<Tree> = path.ancestors().fold(None, |child, path| {
-                                let ancestor = path.to_owned();
-                                let mut contents: Vec<_> = fs::read_dir(&path)
-                                    .ok()?
-                                    .filter_map(Result::ok)
-                                    .filter_map(|entry| {
-                                        let path = entry.path();
+                                let tree: Option<Tree> =
+                                    path.ancestors().fold(None, |child, path| {
+                                        let ancestor = path.to_owned();
+                                        let mut contents: Vec<_> = fs::read_dir(&path)
+                                            .ok()?
+                                            .filter_map(Result::ok)
+                                            .filter_map(|entry| {
+                                                let path = entry.path();
 
-                                        match &child {
-                                            None => Some(path),
-                                            Some(child) => {
-                                                if child.path().to_owned() != path {
-                                                    Some(path)
+                                                match &child {
+                                                    None => Some(path),
+                                                    Some(child) => {
+                                                        if child.path().to_owned() != path {
+                                                            Some(path)
+                                                        } else {
+                                                            None
+                                                        }
+                                                    }
+                                                }
+                                            })
+                                            .map(Tree::new)
+                                            .collect();
+
+                                        if let Some(child) = child {
+                                            contents.push(child);
+                                        }
+
+                                        let mut parent_tree = Tree::new(ancestor);
+
+                                        parent_tree.set_children(contents);
+                                        parent_tree.open();
+
+                                        Some(parent_tree)
+                                    });
+
+                                let state = ListState::default();
+
+                                self.mode = Mode::DestinationSelection((tree.unwrap(), state));
+                            }
+                        }
+                    }
+
+                    Some(download_path) => {
+                        let selected_items: Vec<Volume> = {
+                            let library = self.library.lock().unwrap();
+                            let selected = self.selected.lock().unwrap();
+
+                            library
+                                .clone()
+                                .unwrap_or_default()
+                                .volumes
+                                .iter()
+                                .enumerate()
+                                .filter_map(|(index, volume)| {
+                                    if selected.contains(&index) {
+                                        Some(volume.clone())
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect()
+                        };
+
+                        let selectected_arc = Arc::new(Mutex::new(selected_items.clone()));
+
+                        join_all(selected_items.iter().enumerate().map(|(count, volume)| {
+                            let count = count + 1;
+                            let mut download_path = download_path.clone();
+                            download_path.push(volume.volume_name.clone());
+                            download_path.set_extension("epub");
+
+                            let volume = volume.clone();
+                            let user = user.clone();
+                            let selected = self.selected.clone();
+                            let selected_items = selectected_arc.clone();
+                            tokio::spawn(async move {
+                                let file = if try_exists(&download_path).await.unwrap_or(false) {
+                                    File::open(download_path).await
+                                } else {
+                                    File::create(download_path).await
+                                };
+
+                                if let Ok(mut file) = file {
+                                    let mut buffer: Vec<u8> = vec![];
+                                    sleep(Duration::from_millis(10 * count as u64)).await;
+                                    if volume.write_epub_to(user, &mut buffer).await.is_ok() {
+                                        let _ = file.write_all(&buffer).await.is_ok();
+                                    }
+
+                                    if let Ok(mut selected_items) = selected_items.lock() {
+                                        let index = selected_items
+                                            .iter()
+                                            .enumerate()
+                                            .find_map(|(index, vol)| {
+                                                if vol.id == volume.id {
+                                                    Some(index)
                                                 } else {
                                                     None
                                                 }
-                                            }
-                                        }
-                                    })
-                                    .map(Tree::new)
-                                    .collect();
+                                            })
+                                            .unwrap();
 
-                                if let Some(child) = child {
-                                    contents.push(child);
+                                        selected_items.remove(index);
+                                        selected.lock().unwrap().remove(index);
+                                    }
                                 }
-
-                                let mut parent_tree = Tree::new(ancestor);
-
-                                parent_tree.set_children(contents);
-                                parent_tree.open();
-
-                                Some(parent_tree)
-                            });
-
-                            let state = ListState::default();
-
-                            self.mode = Mode::DestinationSelection((tree.unwrap(), state));
-                        }
+                            })
+                        }))
+                        .await;
                     }
                 }
 
@@ -142,6 +229,11 @@ impl Download {
                 }
             }
             Mode::Download | Mode::Normal => {
+                let chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([Constraint::Length(1), Constraint::Max(3)])
+                    .split(rect);
+
                 let selected_items: Vec<ListItem> = {
                     let library = self.library.lock().unwrap();
                     let selected = self.selected.lock().unwrap();
@@ -178,7 +270,23 @@ impl Download {
                     .highlight_style(highlight_style)
                     .highlight_symbol("> ");
 
-                frame.render_widget(selection, rect);
+                frame.render_widget(selection, chunks[0]);
+
+                let block = Block::default()
+                    .title("Destination (F)")
+                    .borders(Borders::ALL);
+
+                let text = Span::raw(
+                    self.url
+                        .clone()
+                        .and_then(|path| path.to_str().map(|path| path.to_string()))
+                        .unwrap_or("Press F to select destination".to_string()),
+                );
+                let text = vec![(ListItem::new(text))];
+
+                let text = List::new(text).block(block);
+
+                frame.render_widget(text, chunks[1]);
             }
         }
     }
@@ -191,7 +299,19 @@ impl Download {
 
                 true
             }
-            (Mode::DestinationSelection(_), KeyCode::Enter) => {
+
+            (Mode::Download, KeyCode::Char('d')) => true,
+
+            (Mode::DestinationSelection((tree, state)), KeyCode::Enter) => {
+                self.new_url = state
+                    .selected()
+                    .and_then(|index| {
+                        let mut index = index.clone();
+                        tree.get(&mut index)
+                    })
+                    .map(|node| node.path())
+                    .map(|path| path.to_owned());
+
                 self.mode = Mode::Normal;
                 *normal_mode = true;
 
@@ -213,6 +333,34 @@ impl Download {
 
                 true
             }
+
+            (
+                Mode::DestinationSelection((tree, state)),
+                KeyCode::Char('o') | KeyCode::Char(' '),
+            ) => {
+                if let Some(node) = state.selected().and_then(|index| {
+                    let mut index = index.clone();
+                    tree.get(&mut index)
+                }) {
+                    node.toggl();
+
+                    let path = node.path();
+                    let contents: Option<Vec<_>> = match fs::read_dir(&path) {
+                        Ok(dir) => Some(
+                            dir.filter_map(Result::ok)
+                                .map(|entry| entry.path())
+                                .map(Tree::new)
+                                .collect(),
+                        ),
+                        Err(_) => None,
+                    };
+
+                    node.set_children_optional(contents);
+                }
+
+                true
+            }
+
             (Mode::DestinationSelection((tree, state)), KeyCode::Char('k') | KeyCode::Up) => {
                 match (tree.list_items(), state.selected()) {
                     (Some(tree), Some(selected)) => {
@@ -235,7 +383,7 @@ impl Download {
         }
     }
 
-    pub fn get_selections(&self) -> Rc<Mutex<Vec<usize>>> {
+    pub fn get_selections(&self) -> Arc<Mutex<Vec<usize>>> {
         self.selected.clone()
     }
 }

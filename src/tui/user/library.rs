@@ -1,4 +1,7 @@
-use std::{rc::Rc, sync::Mutex};
+use std::{
+    rc::Rc,
+    sync::{Arc, Mutex},
+};
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
@@ -15,7 +18,8 @@ use crate::utils::ToDedup;
 use super::Download;
 
 pub struct User {
-    selected: Rc<Mutex<Vec<usize>>>,
+    selected: Arc<Mutex<Vec<usize>>>,
+
     list_state: ListState,
     user: crate::User,
     download_tab: Download,
@@ -33,7 +37,7 @@ enum Mode {
 impl User {
     pub async fn prerender(&mut self) -> anyhow::Result<()> {
         match self.mode {
-            Mode::Download => self.download_tab.prerender().await,
+            Mode::Download => self.download_tab.prerender(&self.user).await,
             _ => Ok(()),
         }
     }
@@ -153,12 +157,14 @@ impl User {
                 self.mode = Mode::Highlight;
                 true
             }
+
             (Mode::Normal, KeyCode::Char('d')) => {
                 self.mode = Mode::Download;
                 self.download_tab.new_event(normal_mode, event);
 
                 true
             }
+
             (Mode::Highlight, KeyCode::Char('j') | KeyCode::Down) => {
                 match (Option::as_ref(&library), self.list_state.selected()) {
                     (Some(library), Some(selected)) => {
@@ -175,6 +181,7 @@ impl User {
 
                 true
             }
+
             (Mode::Highlight, KeyCode::Char('k') | KeyCode::Up) => {
                 match (Option::as_ref(&library), self.list_state.selected()) {
                     (Some(library), Some(selected)) => {
@@ -194,6 +201,7 @@ impl User {
                 };
                 true
             }
+
             (
                 Mode::Highlight | Mode::Download,
                 KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('l'),
@@ -204,6 +212,7 @@ impl User {
 
                 true
             }
+
             (Mode::Highlight, KeyCode::Char(' ') | KeyCode::Char('a')) => {
                 let mut selected_item = self.selected.lock().unwrap();
                 if let Some(selected) = self.list_state.selected() {
@@ -228,7 +237,7 @@ impl From<crate::User> for User {
         let list_state = ListState::default();
 
         let library = user.library();
-        let download_tab = Download::new(library, Rc::default());
+        let download_tab = Download::new(library, Arc::default());
         let selected = download_tab.get_selections();
 
         User {
