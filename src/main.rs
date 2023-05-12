@@ -63,7 +63,6 @@ where
             }
 
             if last_tick.elapsed() >= tick_rate {
-                //app.on_tick();
                 last_tick = Instant::now();
             }
         };

@@ -57,7 +57,6 @@ impl User {
             let library = library.clone().unwrap_or_default();
 
             library
-                .clone()
                 .volumes
                 .iter()
                 .enumerate()
@@ -229,7 +228,7 @@ impl From<crate::User> for User {
         let list_state = ListState::default();
 
         let library = user.library();
-        let download_tab = Download::new(library.clone(), Rc::default());
+        let download_tab = Download::new(library, Rc::default());
         let selected = download_tab.get_selections();
 
         User {

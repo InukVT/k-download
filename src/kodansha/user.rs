@@ -9,7 +9,7 @@ use tokio::io::copy;
 
 use crate::Volume;
 
-use super::{library, Library};
+use super::Library;
 
 const CONFIG_DIR: &str = "k-download";
 const CONFIG_FILE: &str = "config.toml";
@@ -65,7 +65,8 @@ impl User {
     }
 
     pub async fn load_library(&mut self) -> anyhow::Result<()> {
-        match self.library.lock() {
+        let library = { self.library.lock() };
+        match library {
             Result::Ok(mut library) => {
                 *library = Some(Library {
                     volumes: reqwest::Client::new()
@@ -85,6 +86,7 @@ impl User {
                                 page_count: volume.page_count,
                                 description: volume.description,
                                 id: volume.id,
+                                series_id: volume.series_id,
                             }),
 
                             None => None,
@@ -94,7 +96,7 @@ impl User {
 
                 Ok(())
             }
-            Err(err) => Result::Err(anyhow!("Couldn't read the mutex")),
+            Err(_) => Result::Err(anyhow!("Couldn't read the mutex")),
         }
     }
 }

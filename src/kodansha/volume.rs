@@ -12,7 +12,7 @@ use serde::Deserialize;
 use crate::kodansha::Page;
 use crate::kodansha::User;
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Volume<VolumeName = String> {
     pub series_name: String,
@@ -21,6 +21,7 @@ pub struct Volume<VolumeName = String> {
     pub page_count: u16,
     pub description: String,
     pub id: u16,
+    pub series_id: u16,
 }
 
 impl Volume {
