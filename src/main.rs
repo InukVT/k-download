@@ -46,6 +46,8 @@ where
 
     let mut app = App::default();
 
+    terminal.clear();
+
     loop {
         let timeout = tick_rate
             .checked_sub(last_tick.elapsed())

@@ -22,7 +22,11 @@ use tokio::{
     time::{sleep, Duration},
 };
 
-use crate::{kodansha::Library, tui::tree::Tree, User, Volume};
+use crate::{
+    kodansha::{volume, Library},
+    tui::tree::Tree,
+    User, Volume,
+};
 
 pub struct Download {
     mode: Mode,
@@ -140,7 +144,7 @@ impl Download {
 
                         let selectected_arc = Arc::new(Mutex::new(selected_items.clone()));
 
-                        join_all(selected_items.iter().enumerate().map(|(count, volume)| {
+                        for _ in selected_items.iter().enumerate().map(|(count, volume)| {
                             let count = count + 1;
                             let mut download_path = download_path.clone();
                             download_path.push(volume.volume_name.clone());
@@ -182,8 +186,9 @@ impl Download {
                                     }
                                 }
                             })
-                        }))
-                        .await;
+                        }) {}
+
+                        self.mode = Mode::Normal;
                     }
                 }
 
