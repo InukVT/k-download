@@ -11,7 +11,7 @@ use crate::User;
 
 use reqwest::Result;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct Page {
     pub url: String,
 }
@@ -36,9 +36,9 @@ impl Page {
         )
     }
 
-    pub async fn stream(self, user: &User) -> Result<Box<[u8]>> {
+    pub async fn stream(&self, user: &User) -> Result<Box<[u8]>> {
         Ok(reqwest::Client::new()
-            .get(self.url)
+            .get(self.url.clone())
             .header("authorization", format!("Bearer {}", user.token))
             .send()
             .await?
@@ -50,8 +50,8 @@ impl Page {
     }
 
     pub async fn write_to_epub(
-        self,
-        page_number: usize,
+        &self,
+        page_number: &usize,
         builder: Arc<Mutex<EpubBuilder<ZipLibrary>>>,
         user: &User,
     ) -> Result<Box<dyn FnOnce() + Send + 'static>> {
@@ -69,7 +69,7 @@ impl Page {
         };
 
         let image_path = format!("images/{}", file_name);
-        let page_number = page_number;
+        let page_number = page_number.clone();
         let page_path = format!("page-{}.xhtml", page_number);
 
         sleep(Duration::from_millis(10 * page_number as u64)).await;

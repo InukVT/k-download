@@ -59,8 +59,10 @@ impl Volume {
 
         let builder = Arc::new(Mutex::new(builder));
 
-        let mut pages = join_all(self.page_links(&user).await.into_iter().map(
-            |(page_number, page)| {
+        let page_requests = self.page_links(&user).await;
+
+        for chunks in page_requests.chunks(10) {
+            let chunks = chunks.into_iter().map(|(page_number, page)| {
                 let user = user.clone();
                 let builder = builder.clone();
                 tokio::spawn(async move {
@@ -71,19 +73,19 @@ impl Volume {
                             .unwrap(),
                     )
                 })
-            },
-        ))
-        .await;
+            });
 
-        pages.sort_by_key(|r| match r {
-            Ok(res) => res.0,
-            Err(_) => panic!(),
-        });
+            let mut pages = join_all(chunks).await;
 
-        for (_, fun) in pages.into_iter().map(|r| r.unwrap()) {
-            fun();
+            pages.sort_by_key(|r| match r {
+                Ok(res) => res.0,
+                Err(_) => panic!(),
+            });
+
+            for (_, fun) in pages.into_iter().map(|r| r.unwrap()) {
+                fun();
+            }
         }
-
         let mut builder = builder.lock().unwrap();
         let _ = builder.generate(writer);
         Ok(())
