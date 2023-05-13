@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::Duration;
 
 use anyhow::Result;
 use epub_builder::EpubBuilder;
@@ -8,6 +9,7 @@ use epub_builder::ZipLibrary;
 use futures::future::join_all;
 use serde::Deserialize;
 use tokio::sync::mpsc::Sender;
+use tokio::time::sleep;
 
 use crate::kodansha::Page;
 use crate::kodansha::User;
@@ -75,6 +77,7 @@ impl Volume {
             });
 
             let pages = join_all(chunks).await;
+            sleep(Duration::from_millis(10)).await;
 
             for fun in pages.into_iter().map(|fun| fun.unwrap()) {
                 let page = fun() + 1;
@@ -99,6 +102,8 @@ impl Volume {
             let volume_route = volume_route.clone();
             let token = user.token.clone();
             let bearer = format!("Bearer {}", &token);
+            sleep(Duration::from_millis(10)).await;
+
             let chunk = chunk.iter().map(|index| {
                 let page_route = format!("{}/pages/{page}", volume_route, page = index);
 

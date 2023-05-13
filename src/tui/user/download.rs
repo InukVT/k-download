@@ -1,7 +1,6 @@
 use std::{
     collections::HashMap,
     env::current_dir,
-    fmt::format,
     fs,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -156,7 +155,6 @@ impl Download {
                         let selectected_arc = Arc::new(Mutex::new(selected_items.clone()));
 
                         for _ in selected_items.iter().enumerate().map(|(count, volume)| {
-                            let count = count + 1;
                             let mut download_path = download_path.clone();
                             download_path.push(volume.volume_name.clone());
                             download_path.set_extension("epub");
@@ -339,7 +337,16 @@ impl Download {
                 true
             }
 
-            (Mode::Download, KeyCode::Char('d')) => true,
+            (Mode::Normal, KeyCode::Char('d')) => {
+                let selected = { self.selected.lock().unwrap().len() > 0 };
+                if let (DownloadDestination::Current(_), true) = (&mut self.destination, selected) {
+                    self.mode = Mode::Download;
+
+                    true
+                } else {
+                    false
+                }
+            }
 
             (Mode::DestinationSelection((tree, state)), KeyCode::Enter) => {
                 if let Some(new_url) = state
