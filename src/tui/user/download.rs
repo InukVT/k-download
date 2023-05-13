@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     env::current_dir,
+    fmt::format,
     fs,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -34,13 +35,14 @@ pub struct Download {
     rx: Receiver<(u16, u8)>,
 }
 
+#[derive(Debug)]
 enum DownloadDestination {
     New(PathBuf),
     Current(PathBuf),
     None,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 enum Mode {
     #[default]
     Normal,
@@ -291,9 +293,15 @@ impl Download {
                         .collect()
                 };
 
-                let block = Block::default()
-                    .title("To Download (D)")
-                    .borders(Borders::ALL);
+                let download_title = format!(
+                    "Queue{}",
+                    if let DownloadDestination::Current(_) = self.destination {
+                        " (D)"
+                    } else {
+                        ""
+                    }
+                );
+                let block = Block::default().title(download_title).borders(Borders::ALL);
 
                 let highlight_style = Style::default().add_modifier(Modifier::BOLD);
                 let selection = List::new(selected_items)
@@ -322,8 +330,10 @@ impl Download {
 
     pub fn new_event(&mut self, normal_mode: &mut bool, event: KeyEvent) -> bool {
         match (&mut self.mode, event.code) {
-            (Mode::Normal, KeyCode::Char('d')) => {
+            (Mode::Normal, KeyCode::Char('f')) => {
                 self.mode = Mode::Download;
+                self.destination = DownloadDestination::None;
+
                 *normal_mode = false;
 
                 true

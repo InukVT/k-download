@@ -33,10 +33,7 @@ enum Mode {
 
 impl User {
     pub async fn prerender(&mut self) -> anyhow::Result<()> {
-        match self.mode {
-            Mode::Download => self.download_tab.prerender(&self.user).await,
-            _ => Ok(()),
-        }
+        self.download_tab.prerender(&self.user).await
     }
 
     pub fn render<B>(&mut self, frame: &mut Frame<B>)
@@ -155,8 +152,15 @@ impl User {
                 true
             }
 
-            (Mode::Normal, KeyCode::Char('d')) => {
+            (Mode::Normal, KeyCode::Char('d') | KeyCode::Char('f')) => {
                 self.mode = Mode::Download;
+                self.download_tab.new_event(normal_mode, event);
+
+                true
+            }
+
+            (Mode::Download, KeyCode::Enter) => {
+                self.mode = Mode::Normal;
                 self.download_tab.new_event(normal_mode, event);
 
                 true

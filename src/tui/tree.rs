@@ -5,7 +5,7 @@ use ratatui::{
     widgets::ListItem,
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Tree {
     path: PathBuf,
     children: Option<Vec<Tree>>,
