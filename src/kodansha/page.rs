@@ -54,7 +54,7 @@ impl Page {
         page_number: &usize,
         builder: Arc<Mutex<EpubBuilder<ZipLibrary>>>,
         user: &User,
-    ) -> Result<Box<dyn FnOnce() + Send + 'static>> {
+    ) -> Result<Box<dyn FnOnce() -> usize + Send + 'static>> {
         let (file_name, title, reference_type) = match page_number {
             0 => (
                 "cover.jpeg".to_string(),
@@ -96,6 +96,8 @@ impl Page {
             let mut builder = builder.lock().unwrap();
 
             (*builder).add_content(image).unwrap();
+
+            page_number
         }))
     }
 }

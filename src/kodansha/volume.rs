@@ -7,6 +7,7 @@ use epub_builder::EpubVersion;
 use epub_builder::ZipLibrary;
 use futures::future::join_all;
 use serde::Deserialize;
+use tokio::sync::mpsc::Sender;
 
 use crate::kodansha::Page;
 use crate::kodansha::User;
@@ -36,7 +37,12 @@ impl Volume {
         Ok(volume)
     }
 
-    pub async fn write_epub_to<W>(&self, user: User, writer: &mut W) -> anyhow::Result<()>
+    pub async fn write_epub_to<W>(
+        &self,
+        user: User,
+        writer: &mut W,
+        progress: Sender<(u16, u8)>,
+    ) -> anyhow::Result<()>
     where
         W: std::io::Write,
     {
@@ -60,6 +66,7 @@ impl Volume {
         let builder = Arc::new(Mutex::new(builder));
 
         let page_requests = self.page_links(&user).await;
+        let page_count = self.page_count as usize;
 
         for chunks in page_requests.chunks(10) {
             let chunks = chunks.iter().map(|(page_number, page)| async {
@@ -70,7 +77,11 @@ impl Volume {
             let pages = join_all(chunks).await;
 
             for fun in pages.into_iter().map(|fun| fun.unwrap()) {
-                fun();
+                let page = fun() + 1;
+                let decimal: f32 = page as f32 / page_count as f32;
+                let percent = decimal * 100.0f32;
+
+                progress.send((self.id, percent as u8)).await?;
             }
         }
 

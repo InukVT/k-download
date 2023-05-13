@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     env::current_dir,
     fs,
     path::{Path, PathBuf},
@@ -9,14 +10,15 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     backend::Backend,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Modifier, Style},
-    text::Span,
+    style::{Color, Modifier, Style},
+    text::{Span, Spans},
     widgets::{Block, Borders, List, ListItem, ListState},
     Frame,
 };
 use tokio::{
     fs::{try_exists, File},
     io::AsyncWriteExt,
+    sync::mpsc::{channel, Receiver, Sender},
     time::{sleep, Duration},
 };
 
@@ -27,6 +29,9 @@ pub struct Download {
     destination: DownloadDestination,
     library: Arc<Mutex<Option<Library>>>,
     selected: Arc<Mutex<Vec<usize>>>,
+    percents: HashMap<u16, u8>,
+    tx: Sender<(u16, u8)>,
+    rx: Receiver<(u16, u8)>,
 }
 
 enum DownloadDestination {
@@ -45,15 +50,23 @@ enum Mode {
 
 impl Download {
     pub fn new(library: Arc<Mutex<Option<Library>>>, selected: Arc<Mutex<Vec<usize>>>) -> Self {
+        let (tx, rx) = channel(100);
         Download {
             mode: Mode::default(),
             destination: DownloadDestination::None,
             library,
             selected,
+            tx,
+            rx,
+            percents: HashMap::default(),
         }
     }
 
     pub async fn prerender(&mut self, user: &User) -> anyhow::Result<()> {
+        while let Ok((id, percent)) = self.rx.try_recv() {
+            self.percents.insert(id, percent);
+        }
+
         if let DownloadDestination::New(new_url) = &mut self.destination {
             let new_url = new_url.to_owned();
             set_download_dir(new_url.as_ref()).await?;
@@ -150,6 +163,10 @@ impl Download {
                             let user = user.clone();
                             let selected = self.selected.clone();
                             let selected_items = selectected_arc.clone();
+                            let tx = self.tx.clone();
+
+                            self.percents.insert(volume.id, 0);
+
                             tokio::spawn(async move {
                                 let file = if try_exists(&download_path).await.unwrap_or(false) {
                                     File::open(download_path).await
@@ -160,7 +177,7 @@ impl Download {
                                 if let Ok(mut file) = file {
                                     let mut buffer: Vec<u8> = vec![];
                                     sleep(Duration::from_millis(10 * count as u64)).await;
-                                    if volume.write_epub_to(user, &mut buffer).await.is_ok() {
+                                    if volume.write_epub_to(user, &mut buffer, tx).await.is_ok() {
                                         let _ = file.write_all(&buffer).await.is_ok();
                                     }
 
@@ -241,6 +258,7 @@ impl Download {
                     let library = self.library.lock().unwrap();
                     let selected = self.selected.lock().unwrap();
                     let styled = Style::default();
+                    let percent_style = Style::default().fg(Color::Green);
 
                     library
                         .clone()
@@ -256,9 +274,19 @@ impl Download {
                             }
                         })
                         .map(|volume| {
+                            let percent = self
+                                .percents
+                                .get(&volume.id)
+                                .map(|percent| {
+                                    Span::styled(format!("[{}%] ", percent), percent_style)
+                                })
+                                .unwrap_or(Span::raw(""));
+
                             let span = Span::styled(volume.volume_name, styled);
 
-                            ListItem::new(span)
+                            let book = Spans::from(vec![percent, span]);
+
+                            ListItem::new(book)
                         })
                         .collect()
                 };

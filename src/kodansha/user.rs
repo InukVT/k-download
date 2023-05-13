@@ -4,8 +4,10 @@ use std::sync::{Arc, Mutex};
 use anyhow::{anyhow, Ok};
 use reqwest;
 use serde::{Deserialize, Serialize};
-use tokio::fs::{create_dir, File};
-use tokio::io::copy;
+use tokio::{
+    fs::{create_dir, File},
+    io::copy,
+};
 
 use crate::Volume;
 
