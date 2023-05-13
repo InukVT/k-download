@@ -62,7 +62,7 @@ impl Volume {
         let page_requests = self.page_links(&user).await;
 
         for chunks in page_requests.chunks(10) {
-            let chunks = chunks.into_iter().map(|(page_number, page)| async {
+            let chunks = chunks.iter().map(|(page_number, page)| async {
                 page.write_to_epub(page_number, Arc::clone(&builder), &user)
                     .await
             });

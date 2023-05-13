@@ -34,13 +34,10 @@ impl Tree {
             return None;
         }
 
-        let title = if Path::new("/").to_owned() == self.path {
+        let title = if *Path::new("/") == self.path {
             "/"
         } else {
-            let file_name = self.path.file_name()?;
-            let str = file_name.to_str()?;
-
-            str
+            self.path.file_name()?.to_str()?
         }
         .to_owned();
 

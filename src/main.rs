@@ -46,7 +46,7 @@ where
 
     let mut app = App::default();
 
-    terminal.clear();
+    terminal.clear()?;
 
     loop {
         let timeout = tick_rate

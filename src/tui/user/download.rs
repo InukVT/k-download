@@ -2,12 +2,10 @@ use std::{
     env::current_dir,
     fs,
     path::{Path, PathBuf},
-    rc::Rc,
     sync::{Arc, Mutex},
 };
 
 use crossterm::event::{KeyCode, KeyEvent};
-use futures_util::future::join_all;
 use ratatui::{
     backend::Backend,
     layout::{Constraint, Direction, Layout, Rect},
@@ -22,18 +20,19 @@ use tokio::{
     time::{sleep, Duration},
 };
 
-use crate::{
-    kodansha::{volume, Library},
-    tui::tree::Tree,
-    User, Volume,
-};
+use crate::{kodansha::Library, tui::tree::Tree, User, Volume};
 
 pub struct Download {
     mode: Mode,
-    url: Option<PathBuf>,
-    new_url: Option<PathBuf>,
+    destination: DownloadDestination,
     library: Arc<Mutex<Option<Library>>>,
     selected: Arc<Mutex<Vec<usize>>>,
+}
+
+enum DownloadDestination {
+    New(PathBuf),
+    Current(PathBuf),
+    None,
 }
 
 #[derive(Default)]
@@ -48,41 +47,38 @@ impl Download {
     pub fn new(library: Arc<Mutex<Option<Library>>>, selected: Arc<Mutex<Vec<usize>>>) -> Self {
         Download {
             mode: Mode::default(),
-            url: None,
-            new_url: None,
+            destination: DownloadDestination::None,
             library,
             selected,
         }
     }
 
     pub async fn prerender(&mut self, user: &User) -> anyhow::Result<()> {
-        if let Some(new_url) = &mut self.new_url {
+        if let DownloadDestination::New(new_url) = &mut self.destination {
             let new_url = new_url.to_owned();
-            self.new_url = None;
             set_download_dir(new_url.as_ref()).await?;
-            self.url = Some(new_url);
+
+            self.destination = DownloadDestination::Current(new_url);
         }
 
         match &self.mode {
             Mode::Download => {
-                match &self.url {
-                    None => {
+                match &self.destination {
+                    DownloadDestination::None => {
                         let dest = download_dir().await;
 
                         match dest {
-                            Some(dest) => self.url = Some(dest),
+                            Some(dest) => self.destination = DownloadDestination::Current(dest),
                             None => {
                                 let path = current_dir()?;
-                                self.url = Some(path.clone());
+                                self.destination = DownloadDestination::Current(path.clone());
 
                                 set_download_dir(&path).await?;
-
-                                self.url = Some(path.clone());
 
                                 let tree: Option<Tree> =
                                     path.ancestors().fold(None, |child, path| {
                                         let ancestor = path.to_owned();
-                                        let mut contents: Vec<_> = fs::read_dir(&path)
+                                        let mut contents: Vec<_> = fs::read_dir(path)
                                             .ok()?
                                             .filter_map(Result::ok)
                                             .filter_map(|entry| {
@@ -91,7 +87,7 @@ impl Download {
                                                 match &child {
                                                     None => Some(path),
                                                     Some(child) => {
-                                                        if child.path().to_owned() != path {
+                                                        if *child.path() != path {
                                                             Some(path)
                                                         } else {
                                                             None
@@ -121,7 +117,7 @@ impl Download {
                         }
                     }
 
-                    Some(download_path) => {
+                    DownloadDestination::Current(download_path) => {
                         let selected_items: Vec<Volume> = {
                             let library = self.library.lock().unwrap();
                             let selected = self.selected.lock().unwrap();
@@ -190,6 +186,7 @@ impl Download {
 
                         self.mode = Mode::Normal;
                     }
+                    _ => {}
                 }
 
                 Ok(())
@@ -205,18 +202,19 @@ impl Download {
         match &mut self.mode {
             Mode::DestinationSelection((tree, state)) => {
                 if let Some(items) = tree.list_items() {
-                    match (state.selected().is_none(), self.url.clone()) {
-                        (true, Some(url)) => state.select(
+                    if let (true, DownloadDestination::Current(url)) =
+                        (state.selected().is_none(), &self.destination)
+                    {
+                        state.select(
                             items
                                 .clone()
                                 .into_iter()
                                 .map(|(_, path)| path)
                                 .enumerate()
                                 .find_map(
-                                    |(index, path)| if path == url { Some(index) } else { None },
+                                    |(index, path)| if path == *url { Some(index) } else { None },
                                 ),
-                        ),
-                        _ => {}
+                        )
                     }
 
                     let block = Block::default()
@@ -281,12 +279,10 @@ impl Download {
                     .title("Destination (F)")
                     .borders(Borders::ALL);
 
-                let text = Span::raw(
-                    self.url
-                        .clone()
-                        .and_then(|path| path.to_str().map(|path| path.to_string()))
-                        .unwrap_or("Press F to select destination".to_string()),
-                );
+                let text = Span::raw(match &self.destination {
+                    DownloadDestination::Current(path) => path.to_str().unwrap_or("").to_string(),
+                    _ => "Press F to select destination".to_string(),
+                });
                 let text = vec![(ListItem::new(text))];
 
                 let text = List::new(text).block(block);
@@ -308,14 +304,18 @@ impl Download {
             (Mode::Download, KeyCode::Char('d')) => true,
 
             (Mode::DestinationSelection((tree, state)), KeyCode::Enter) => {
-                self.new_url = state
+                if let Some(new_url) = state
                     .selected()
                     .and_then(|index| {
-                        let mut index = index.clone();
+                        let mut index = index;
                         tree.get(&mut index)
                     })
                     .map(|node| node.path())
-                    .map(|path| path.to_owned());
+                    .map(|path| path.to_owned())
+                    .map(DownloadDestination::New)
+                {
+                    self.destination = new_url;
+                }
 
                 self.mode = Mode::Normal;
                 *normal_mode = true;
@@ -344,13 +344,13 @@ impl Download {
                 KeyCode::Char('o') | KeyCode::Char(' '),
             ) => {
                 if let Some(node) = state.selected().and_then(|index| {
-                    let mut index = index.clone();
+                    let mut index = index;
                     tree.get(&mut index)
                 }) {
                     node.toggl();
 
                     let path = node.path();
-                    let contents: Option<Vec<_>> = match fs::read_dir(&path) {
+                    let contents: Option<Vec<_>> = match fs::read_dir(path) {
                         Ok(dir) => Some(
                             dir.filter_map(Result::ok)
                                 .map(|entry| entry.path())

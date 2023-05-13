@@ -69,7 +69,7 @@ impl Page {
         };
 
         let image_path = format!("images/{}", file_name);
-        let page_number = page_number.clone();
+        let page_number = *page_number;
         let page_path = format!("page-{}.xhtml", page_number);
 
         sleep(Duration::from_millis(10 * page_number as u64)).await;

@@ -1,7 +1,4 @@
-use std::{
-    rc::Rc,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
@@ -88,7 +85,7 @@ impl User {
         let list = List::new(list_items)
             .block(block)
             .highlight_style(highlight_style)
-            .highlight_symbol("> ");
+            .highlight_symbol(">");
 
         let book_chunks = Layout::default()
             .direction(Direction::Vertical)
