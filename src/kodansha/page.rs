@@ -1,11 +1,7 @@
-use std::{
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::sync::{Arc, Mutex};
 
 use epub_builder::{EpubBuilder, EpubContent, ReferenceType, ZipLibrary};
 use serde::Deserialize;
-use tokio::time::sleep;
 
 use crate::User;
 
