@@ -33,6 +33,7 @@ struct KodanshaUser {
     pub token: String,
     #[serde(alias = "refresh_token")]
     pub refresh: String,
+    #[serde(with = "from_str")]
     pub expires_in: i64,
 }
 
@@ -40,6 +41,7 @@ struct KodanshaUser {
 struct KodanshaRefresh {
     #[serde(alias = "access_token")]
     pub token: String,
+    #[serde(with = "from_str")]
     pub expires_in: i64,
 }
 
@@ -322,4 +324,25 @@ fn expirery(expires_in: i64) -> DateTime<Utc> {
     let slack = Duration::minutes(60);
 
     now + offset - slack
+}
+
+mod from_str {
+    use serde::{self, Deserialize, Deserializer};
+
+    // The signature of a deserialize_with function must follow the pattern:
+    //
+    //    fn deserialize<'de, D>(D) -> Result<T, D::Error>
+    //    where
+    //        D: Deserializer<'de>
+    //
+    // although it may also be generic over the output types T.
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<i64, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let string = String::deserialize(deserializer)?;
+
+        let str: &str = string.as_str();
+        i64::from_str_radix(str, 10).map_err(serde::de::Error::custom)
+    }
 }

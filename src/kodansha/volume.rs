@@ -97,7 +97,7 @@ impl Volume {
 
         let mut pages = Vec::new();
 
-        for chunk in (0..self.page_count + 1).collect::<Vec<_>>().chunks(10) {
+        for chunk in (0..self.page_count - 1).collect::<Vec<_>>().chunks(10) {
             let volume_route = volume_route.clone();
             let bearer = format!("Bearer {}", &token);
             sleep(Duration::from_millis(10)).await;
@@ -106,17 +106,15 @@ impl Volume {
                 let page_route = format!("{}/pages/{page}", volume_route, page = index);
 
                 async {
+                    let page_request = reqwest::Client::new()
+                        .get(page_route)
+                        .header("authorization", bearer.clone())
+                        .send()
+                        .await
+                        .unwrap();
                     (
                         (*index as usize),
-                        reqwest::Client::new()
-                            .get(page_route)
-                            .header("authorization", bearer.clone())
-                            .send()
-                            .await
-                            .unwrap()
-                            .json::<Page>()
-                            .await
-                            .unwrap(),
+                        page_request.json::<Page>().await.unwrap(),
                     )
                 }
             });

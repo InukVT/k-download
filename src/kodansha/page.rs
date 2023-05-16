@@ -5,7 +5,7 @@ use serde::Deserialize;
 
 use reqwest::Result;
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 pub struct Page {
     pub url: String,
 }
