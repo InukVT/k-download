@@ -33,7 +33,7 @@ enum Mode {
 
 impl User {
     pub async fn prerender(&mut self) -> anyhow::Result<()> {
-        self.download_tab.prerender(&self.user).await
+        self.download_tab.prerender(&mut self.user).await
     }
 
     pub fn render<B>(&mut self, frame: &mut Frame<B>)

@@ -1,6 +1,8 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+use chrono::{DateTime, Duration, Utc};
+
 use anyhow::{anyhow, Ok};
 use reqwest;
 use serde::{Deserialize, Serialize};
@@ -29,11 +31,36 @@ pub struct Credentials {
 struct KodanshaUser {
     #[serde(alias = "access_token")]
     pub token: String,
+    #[serde(alias = "refresh_token")]
+    pub refresh: String,
+    pub expires_in: i64,
+}
+
+#[derive(Deserialize)]
+struct KodanshaRefresh {
+    #[serde(alias = "access_token")]
+    pub token: String,
+    pub expires_in: i64,
+}
+
+#[derive(Serialize)]
+struct KodanshaRefreshRequest {
+    #[serde(alias = "refresh_token")]
+    pub token: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct StoredUser {
+    token: String,
+    refresh: String,
+    expirery: DateTime<Utc>,
 }
 
 #[derive(Clone)]
 pub struct User {
-    pub token: String,
+    token: String,
+    refresh: String,
+    expirery: DateTime<Utc>,
     library: Arc<Mutex<Option<Library>>>,
 }
 
@@ -55,15 +82,49 @@ impl User {
 
     async fn persist(&self, path: &str) -> anyhow::Result<()> {
         let mut file = File::create(path).await?;
-        let token = self.token.clone();
+        let stored: StoredUser = self.into();
 
-        copy(&mut token.as_bytes(), &mut file).await?;
+        let data = toml::to_string_pretty(&stored)?;
+
+        copy(&mut data.as_bytes(), &mut file).await?;
 
         Ok(())
     }
 
     pub fn library(&self) -> Arc<Mutex<Option<Library>>> {
         self.library.clone()
+    }
+
+    pub async fn token(&mut self) -> anyhow::Result<String> {
+        let mut data_dir = dirs::data_dir().ok_or(anyhow!("No data dir"))?;
+        data_dir.push(CONFIG_DIR);
+        data_dir.push(TOKEN_FILE);
+
+        let token_file = data_dir.into_os_string();
+        let token_path = token_file
+            .to_str()
+            .ok_or(anyhow!("Couldn't convert options path to path"))?;
+
+        let now = Utc::now();
+        if now < self.expirery {
+            return Ok(self.token.clone());
+        }
+
+        let refresh: KodanshaRefreshRequest = self.into();
+
+        let refresh = reqwest::Client::new()
+            .post("https://api.kodansha.us/account/token")
+            .json(&refresh)
+            .send()
+            .await?
+            .json::<KodanshaRefresh>()
+            .await?;
+
+        self.token = refresh.token;
+        self.expirery = expirery(refresh.expires_in);
+        self.persist(token_path).await?;
+
+        Ok(self.token.clone())
     }
 
     pub async fn load_library(&mut self) -> anyhow::Result<()> {
@@ -102,15 +163,6 @@ impl User {
                 Ok(())
             }
             Err(_) => Result::Err(anyhow!("Couldn't read the mutex")),
-        }
-    }
-}
-
-impl From<KodanshaUser> for User {
-    fn from(value: KodanshaUser) -> Self {
-        Self {
-            token: value.token,
-            library: Arc::default(),
         }
     }
 }
@@ -196,11 +248,9 @@ impl Credentials {
 
         let user = if Path::new(token_path).exists() {
             let token = tokio::fs::read_to_string(token_path).await?;
+            let stored = toml::from_str::<StoredUser>(&token)?;
 
-            User {
-                token,
-                library: Arc::default(),
-            }
+            stored.into()
         } else {
             let user = User::new(self.username, self.password).await;
 
@@ -211,4 +261,65 @@ impl Credentials {
 
         Ok(user)
     }
+}
+
+impl From<KodanshaUser> for User {
+    fn from(value: KodanshaUser) -> Self {
+        let expirery = expirery(value.expires_in);
+        Self {
+            token: value.token,
+            library: Arc::default(),
+            expirery,
+            refresh: value.refresh,
+        }
+    }
+}
+
+impl From<&StoredUser> for User {
+    fn from(value: &StoredUser) -> Self {
+        Self {
+            token: value.token.clone(),
+            refresh: value.refresh.clone(),
+            expirery: value.expirery,
+            library: Arc::default(),
+        }
+    }
+}
+
+impl From<StoredUser> for User {
+    fn from(value: StoredUser) -> Self {
+        Self {
+            token: value.token,
+            refresh: value.refresh,
+            expirery: value.expirery,
+            library: Arc::default(),
+        }
+    }
+}
+
+impl From<&User> for StoredUser {
+    fn from(value: &User) -> Self {
+        Self {
+            token: value.token.clone(),
+            refresh: value.refresh.clone(),
+            expirery: value.expirery,
+        }
+    }
+}
+
+impl From<&mut User> for KodanshaRefreshRequest {
+    fn from(value: &mut User) -> Self {
+        Self {
+            token: value.token.clone(),
+        }
+    }
+}
+
+fn expirery(expires_in: i64) -> DateTime<Utc> {
+    let now = Utc::now();
+    let offset = Duration::seconds(expires_in);
+    // give expiration a slack case of super slow connections
+    let slack = Duration::minutes(60);
+
+    now + offset - slack
 }

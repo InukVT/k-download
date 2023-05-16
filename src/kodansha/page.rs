@@ -3,8 +3,6 @@ use std::sync::{Arc, Mutex};
 use epub_builder::{EpubBuilder, EpubContent, ReferenceType, ZipLibrary};
 use serde::Deserialize;
 
-use crate::User;
-
 use reqwest::Result;
 
 #[derive(Deserialize, Clone)]
@@ -32,10 +30,10 @@ impl Page {
         )
     }
 
-    pub async fn stream(&self, user: &User) -> Result<Box<[u8]>> {
+    pub async fn stream(&self, token: &String) -> Result<Box<[u8]>> {
         Ok(reqwest::Client::new()
             .get(self.url.clone())
-            .header("authorization", format!("Bearer {}", user.token))
+            .header("authorization", format!("Bearer {}", token))
             .send()
             .await?
             .bytes()
@@ -49,7 +47,7 @@ impl Page {
         &self,
         page_number: &usize,
         builder: Arc<Mutex<EpubBuilder<ZipLibrary>>>,
-        user: &User,
+        token: &String,
     ) -> Result<Box<dyn FnOnce() -> usize + Send + 'static>> {
         let (file_name, title, reference_type) = match page_number {
             0 => (
@@ -68,7 +66,7 @@ impl Page {
         let page_number = *page_number;
         let page_path = format!("page-{}.xhtml", page_number);
 
-        let stream = self.stream(user).await?;
+        let stream = self.stream(token).await?;
 
         {
             let mut builder = builder.lock().unwrap();

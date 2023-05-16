@@ -12,7 +12,6 @@ use tokio::sync::mpsc::Sender;
 use tokio::time::sleep;
 
 use crate::kodansha::Page;
-use crate::kodansha::User;
 
 #[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -41,7 +40,7 @@ impl Volume {
 
     pub async fn write_epub_to<W>(
         &self,
-        user: User,
+        token: &String,
         writer: &mut W,
         progress: Sender<(u16, u8)>,
     ) -> anyhow::Result<()>
@@ -67,12 +66,12 @@ impl Volume {
 
         let builder = Arc::new(Mutex::new(builder));
 
-        let page_requests = self.page_links(&user).await;
+        let page_requests = self.page_links(token).await;
         let page_count = self.page_count as usize;
 
         for chunks in page_requests.chunks(10) {
             let chunks = chunks.iter().map(|(page_number, page)| async {
-                page.write_to_epub(page_number, Arc::clone(&builder), &user)
+                page.write_to_epub(page_number, Arc::clone(&builder), token)
                     .await
             });
 
@@ -93,14 +92,13 @@ impl Volume {
         Ok(())
     }
 
-    pub async fn page_links(&self, user: &User) -> Vec<(usize, Page)> {
+    pub async fn page_links(&self, token: &String) -> Vec<(usize, Page)> {
         let volume_route = format!("https://api.kodansha.us/comic/{}", self.id);
 
         let mut pages = Vec::new();
 
         for chunk in (0..self.page_count + 1).collect::<Vec<_>>().chunks(10) {
             let volume_route = volume_route.clone();
-            let token = user.token.clone();
             let bearer = format!("Bearer {}", &token);
             sleep(Duration::from_millis(10)).await;
 

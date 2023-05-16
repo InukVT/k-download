@@ -16,7 +16,7 @@ pub struct Series {
 }
 
 impl Series {
-    pub async fn from_library(library: &Library, user: &User) -> Vec<Series> {
+    pub async fn from_library(library: &Library, user: &mut User) -> Vec<Series> {
         let mut series: HashMap<u16, Vec<Volume>> = HashMap::new();
         for volume in &library.volumes {
             let mut current_series = match series.get(&volume.series_id) {
@@ -29,7 +29,7 @@ impl Series {
             series.insert(volume.series_id, current_series);
         }
 
-        let token = user.token.clone();
+        let token = user.token().await.unwrap();
         join_all(series.iter().map(move |(series_id, volumes)| {
             let series_route = format!("https://api.kodansha.us/series/{}/", series_id);
             let volumes = volumes.to_owned();

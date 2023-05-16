@@ -63,7 +63,7 @@ impl Download {
         }
     }
 
-    pub async fn prerender(&mut self, user: &User) -> anyhow::Result<()> {
+    pub async fn prerender(&mut self, user: &mut User) -> anyhow::Result<()> {
         while let Ok((id, percent)) = self.rx.try_recv() {
             self.percents.insert(id, percent);
         }
@@ -153,6 +153,7 @@ impl Download {
                         };
 
                         let selectected_arc = Arc::new(Mutex::new(selected_items.clone()));
+                        let token = user.token().await?;
 
                         for _ in selected_items.iter().enumerate().map(|(count, volume)| {
                             let mut download_path = download_path.clone();
@@ -160,7 +161,7 @@ impl Download {
                             download_path.set_extension("epub");
 
                             let volume = volume.clone();
-                            let user = user.clone();
+                            let token = token.clone();
                             let selected = self.selected.clone();
                             let selected_items = selectected_arc.clone();
                             let tx = self.tx.clone();
@@ -177,7 +178,7 @@ impl Download {
                                 if let Ok(mut file) = file {
                                     let mut buffer: Vec<u8> = vec![];
                                     sleep(Duration::from_millis(10 * count as u64)).await;
-                                    if volume.write_epub_to(user, &mut buffer, tx).await.is_ok() {
+                                    if volume.write_epub_to(&token, &mut buffer, tx).await.is_ok() {
                                         let _ = file.write_all(&buffer).await.is_ok();
                                     }
 
