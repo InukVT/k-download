@@ -17,7 +17,7 @@ use super::Library;
 
 const CONFIG_DIR: &str = "k-download";
 const CONFIG_FILE: &str = "config.toml";
-const TOKEN_FILE: &str = "token";
+const TOKEN_FILE: &str = "token.toml";
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Credentials {
