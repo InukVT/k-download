@@ -106,7 +106,7 @@ impl User {
             .ok_or(anyhow!("Couldn't convert options path to path"))?;
 
         let now = Utc::now();
-        if dbg!(now.timestamp()) < dbg!(self.expirery.timestamp()) {
+        if now.timestamp() < self.expirery.timestamp() {
             return Ok(self.token.clone());
         }
 
