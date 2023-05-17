@@ -39,16 +39,14 @@ struct KodanshaUser {
 
 #[derive(Deserialize)]
 struct KodanshaRefresh {
-    #[serde(alias = "access_token")]
-    pub token: String,
+    pub access_token: String,
     #[serde(with = "from_str")]
     pub expires_in: i64,
 }
 
 #[derive(Serialize)]
 struct KodanshaRefreshRequest {
-    #[serde(alias = "refresh_token")]
-    pub token: String,
+    pub refresh_token: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -108,21 +106,20 @@ impl User {
             .ok_or(anyhow!("Couldn't convert options path to path"))?;
 
         let now = Utc::now();
-        if now < self.expirery {
+        if dbg!(now.timestamp()) < dbg!(self.expirery.timestamp()) {
             return Ok(self.token.clone());
         }
 
         let refresh: KodanshaRefreshRequest = self.into();
-
-        let refresh = reqwest::Client::new()
+        let request = reqwest::Client::new()
             .post("https://api.kodansha.us/account/token")
             .json(&refresh)
             .send()
-            .await?
-            .json::<KodanshaRefresh>()
             .await?;
 
-        self.token = refresh.token;
+        let refresh = request.json::<KodanshaRefresh>().await?;
+
+        self.token = refresh.access_token;
         self.expirery = expirery(refresh.expires_in);
         self.persist(token_path).await?;
 
@@ -131,10 +128,11 @@ impl User {
 
     pub async fn load_library(&mut self) -> anyhow::Result<()> {
         // Prefetch so we don't indefinetly hold the mutex in an async context
+        let token = self.token().await?;
         let fetched_library = Library {
             volumes: reqwest::Client::new()
                 .get("https://api.kodansha.us/mycomics/")
-                .header("authorization", format!("Bearer {}", self.token.clone()))
+                .header("authorization", format!("Bearer {}", token))
                 .send()
                 .await?
                 .json::<Vec<Volume<Option<String>>>>()
@@ -312,7 +310,7 @@ impl From<&User> for StoredUser {
 impl From<&mut User> for KodanshaRefreshRequest {
     fn from(value: &mut User) -> Self {
         Self {
-            token: value.token.clone(),
+            refresh_token: value.refresh.clone(),
         }
     }
 }
