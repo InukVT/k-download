@@ -7,6 +7,7 @@ use std::{
 };
 
 use crossterm::event::{KeyCode, KeyEvent};
+use futures_util::future::join_all;
 use ratatui::{
     backend::Backend,
     layout::{Constraint, Direction, Layout, Rect},
@@ -153,54 +154,69 @@ impl Download {
                         };
 
                         let selectected_arc = Arc::new(Mutex::new(selected_items.clone()));
+                        let selected = self.selected.clone();
                         let token = user.token().await?;
+                        let tx = self.tx.clone();
 
-                        for _ in selected_items.iter().enumerate().map(|(count, volume)| {
-                            let mut download_path = download_path.clone();
-                            download_path.push(volume.volume_name.clone());
-                            download_path.set_extension("epub");
+                        let download_path = download_path.clone();
+                        tokio::spawn(async move {
+                            for futs in selected_items.chunks(3) {
+                                let futs = futs.iter().enumerate().map(|(count, volume)| {
+                                    let mut download_path = download_path.clone();
+                                    download_path.push(volume.volume_name.clone());
+                                    download_path.set_extension("epub");
 
-                            let volume = volume.clone();
-                            let token = token.clone();
-                            let selected = self.selected.clone();
-                            let selected_items = selectected_arc.clone();
-                            let tx = self.tx.clone();
+                                    let volume = volume.clone();
+                                    let token = token.clone();
+                                    let selected_items = selectected_arc.clone();
 
-                            self.percents.insert(volume.id, 0);
+                                    let tx = tx.clone();
+                                    let selected = selected.clone();
 
-                            tokio::spawn(async move {
-                                let file = if try_exists(&download_path).await.unwrap_or(false) {
-                                    File::open(download_path).await
-                                } else {
-                                    File::create(download_path).await
-                                };
+                                    async move {
+                                        let _ = tx.send((volume.id, 0)).await;
 
-                                if let Ok(mut file) = file {
-                                    let mut buffer: Vec<u8> = vec![];
-                                    sleep(Duration::from_millis(10 * count as u64)).await;
-                                    if volume.write_epub_to(&token, &mut buffer, tx).await.is_ok() {
-                                        let _ = file.write_all(&buffer).await.is_ok();
+                                        let file =
+                                            if try_exists(&download_path).await.unwrap_or(false) {
+                                                File::open(download_path).await
+                                            } else {
+                                                File::create(download_path).await
+                                            };
+
+                                        if let Ok(mut file) = file {
+                                            let mut buffer: Vec<u8> = vec![];
+                                            sleep(Duration::from_millis(10 * count as u64)).await;
+                                            if volume
+                                                .write_epub_to(&token, &mut buffer, tx)
+                                                .await
+                                                .is_ok()
+                                            {
+                                                let _ = file.write_all(&buffer).await.is_ok();
+                                            }
+
+                                            if let Ok(mut selected_items) = selected_items.lock() {
+                                                let index = selected_items
+                                                    .iter()
+                                                    .enumerate()
+                                                    .find_map(|(index, vol)| {
+                                                        if vol.id == volume.id {
+                                                            Some(index)
+                                                        } else {
+                                                            None
+                                                        }
+                                                    })
+                                                    .unwrap();
+
+                                                selected_items.remove(index);
+                                                selected.lock().unwrap().remove(index);
+                                            }
+                                        }
                                     }
+                                });
 
-                                    if let Ok(mut selected_items) = selected_items.lock() {
-                                        let index = selected_items
-                                            .iter()
-                                            .enumerate()
-                                            .find_map(|(index, vol)| {
-                                                if vol.id == volume.id {
-                                                    Some(index)
-                                                } else {
-                                                    None
-                                                }
-                                            })
-                                            .unwrap();
-
-                                        selected_items.remove(index);
-                                        selected.lock().unwrap().remove(index);
-                                    }
-                                }
-                            })
-                        }) {}
+                                join_all(futs).await;
+                            }
+                        });
 
                         self.mode = Mode::Normal;
                     }
