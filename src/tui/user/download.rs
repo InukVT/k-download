@@ -311,7 +311,11 @@ impl Download {
 
                 let download_title = format!(
                     "Queue{}",
-                    if selected_items.len() > 0 { " (D)" } else { "" }
+                    if !selected_items.is_empty() {
+                        " (D)"
+                    } else {
+                        ""
+                    }
                 );
                 let block = Block::default().title(download_title).borders(Borders::ALL);
 
