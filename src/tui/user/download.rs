@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     env::current_dir,
     fs,
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{Arc, Mutex},
 };
 
@@ -23,7 +23,14 @@ use tokio::{
     time::{sleep, Duration},
 };
 
-use crate::{kodansha::Library, tui::tree::Tree, User, Volume};
+use crate::{
+    kodansha::{
+        user::{download_dir, set_download_dir},
+        Library,
+    },
+    tui::tree::Tree,
+    User, Volume,
+};
 
 pub struct Download {
     mode: Mode,
@@ -40,6 +47,7 @@ enum DownloadDestination {
     New(PathBuf),
     Current(PathBuf),
     None,
+    Selecting,
 }
 
 #[derive(Default, Debug)]
@@ -69,164 +77,157 @@ impl Download {
             self.percents.insert(id, percent);
         }
 
-        if let DownloadDestination::New(new_url) = &mut self.destination {
-            let new_url = new_url.to_owned();
-            set_download_dir(new_url.as_ref()).await?;
+        match &mut self.destination {
+            DownloadDestination::New(new_url) => {
+                let new_url = new_url.to_owned();
+                set_download_dir(new_url.as_ref()).await?;
 
-            self.destination = DownloadDestination::Current(new_url);
+                self.destination = DownloadDestination::Current(new_url);
+            }
+
+            DownloadDestination::None => {
+                let dir = download_dir().await?;
+                if let Some(dir) = dir {
+                    self.destination = DownloadDestination::Current(dir);
+                }
+            }
+
+            _ => (),
         }
 
-        match &self.mode {
-            Mode::Download => {
-                match &self.destination {
-                    DownloadDestination::None => {
-                        let dest = download_dir().await;
+        match (&self.mode, &self.destination) {
+            (Mode::Download, DownloadDestination::Selecting) => {
+                let path = current_dir()?;
+                self.destination = DownloadDestination::Current(path.clone());
 
-                        match dest {
-                            Some(dest) => self.destination = DownloadDestination::Current(dest),
-                            None => {
-                                let path = current_dir()?;
-                                self.destination = DownloadDestination::Current(path.clone());
+                set_download_dir(&path).await?;
 
-                                set_download_dir(&path).await?;
+                let tree: Option<Tree> = path.ancestors().fold(None, |child, path| {
+                    let ancestor = path.to_owned();
+                    let mut contents: Vec<_> = fs::read_dir(path)
+                        .ok()?
+                        .filter_map(Result::ok)
+                        .filter_map(|entry| {
+                            let path = entry.path();
 
-                                let tree: Option<Tree> =
-                                    path.ancestors().fold(None, |child, path| {
-                                        let ancestor = path.to_owned();
-                                        let mut contents: Vec<_> = fs::read_dir(path)
-                                            .ok()?
-                                            .filter_map(Result::ok)
-                                            .filter_map(|entry| {
-                                                let path = entry.path();
-
-                                                match &child {
-                                                    None => Some(path),
-                                                    Some(child) => {
-                                                        if *child.path() != path {
-                                                            Some(path)
-                                                        } else {
-                                                            None
-                                                        }
-                                                    }
-                                                }
-                                            })
-                                            .map(Tree::new)
-                                            .collect();
-
-                                        if let Some(child) = child {
-                                            contents.push(child);
-                                        }
-
-                                        let mut parent_tree = Tree::new(ancestor);
-
-                                        parent_tree.set_children(contents);
-                                        parent_tree.open();
-
-                                        Some(parent_tree)
-                                    });
-
-                                let state = ListState::default();
-
-                                self.mode = Mode::DestinationSelection((tree.unwrap(), state));
-                            }
-                        }
-                    }
-
-                    DownloadDestination::Current(download_path) => {
-                        let selected_items: Vec<Volume> = {
-                            let library = self.library.lock().unwrap();
-                            let selected = self.selected.lock().unwrap();
-
-                            library
-                                .clone()
-                                .unwrap_or_default()
-                                .volumes
-                                .iter()
-                                .enumerate()
-                                .filter_map(|(index, volume)| {
-                                    if selected.contains(&index) {
-                                        Some(volume.clone())
+                            match &child {
+                                None => Some(path),
+                                Some(child) => {
+                                    if *child.path() != path {
+                                        Some(path)
                                     } else {
                                         None
                                     }
-                                })
-                                .collect()
-                        };
+                                }
+                            }
+                        })
+                        .map(Tree::new)
+                        .collect();
 
-                        let selectected_arc = Arc::new(Mutex::new(selected_items.clone()));
-                        let selected = self.selected.clone();
-                        let token = user.token().await?;
-                        let tx = self.tx.clone();
+                    if let Some(child) = child {
+                        contents.push(child);
+                    }
 
-                        let download_path = download_path.clone();
-                        tokio::spawn(async move {
-                            for futs in selected_items.chunks(3) {
-                                let futs = futs.iter().enumerate().map(|(count, volume)| {
-                                    let mut download_path = download_path.clone();
-                                    download_path.push(volume.volume_name.clone());
-                                    download_path.set_extension("epub");
+                    let mut parent_tree = Tree::new(ancestor);
 
-                                    let volume = volume.clone();
-                                    let token = token.clone();
-                                    let selected_items = selectected_arc.clone();
+                    parent_tree.set_children(contents);
+                    parent_tree.open();
 
-                                    let tx = tx.clone();
-                                    let selected = selected.clone();
+                    Some(parent_tree)
+                });
 
-                                    async move {
-                                        let _ = tx.send((volume.id, 0)).await;
+                let state = ListState::default();
 
-                                        let file =
-                                            if try_exists(&download_path).await.unwrap_or(false) {
-                                                File::open(download_path).await
-                                            } else {
-                                                File::create(download_path).await
-                                            };
+                self.mode = Mode::DestinationSelection((tree.unwrap(), state));
+            }
 
-                                        if let Ok(mut file) = file {
-                                            let mut buffer: Vec<u8> = vec![];
-                                            sleep(Duration::from_millis(10 * count as u64)).await;
-                                            if volume
-                                                .write_epub_to(&token, &mut buffer, tx)
-                                                .await
-                                                .is_ok()
-                                            {
-                                                let _ = file.write_all(&buffer).await.is_ok();
-                                            }
+            (Mode::Download, DownloadDestination::Current(download_path)) => {
+                let selected_items: Vec<Volume> = {
+                    let library = self.library.lock().unwrap();
+                    let selected = self.selected.lock().unwrap();
 
-                                            if let Ok(mut selected_items) = selected_items.lock() {
-                                                let index = selected_items
-                                                    .iter()
-                                                    .enumerate()
-                                                    .find_map(|(index, vol)| {
-                                                        if vol.id == volume.id {
-                                                            Some(index)
-                                                        } else {
-                                                            None
-                                                        }
-                                                    })
-                                                    .unwrap();
+                    library
+                        .clone()
+                        .unwrap_or_default()
+                        .volumes
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(index, volume)| {
+                            if selected.contains(&index) {
+                                Some(volume.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect()
+                };
 
-                                                selected_items.remove(index);
-                                                selected.lock().unwrap().remove(index);
-                                            }
-                                        }
+                let selectected_arc = Arc::new(Mutex::new(selected_items.clone()));
+                let selected = self.selected.clone();
+                let token = user.token().await?;
+                let tx = self.tx.clone();
+
+                let download_path = download_path.clone();
+                tokio::spawn(async move {
+                    for futs in selected_items.chunks(3) {
+                        let futs = futs.iter().enumerate().map(|(count, volume)| {
+                            let mut download_path = download_path.clone();
+                            download_path.push(volume.volume_name.clone());
+                            download_path.set_extension("epub");
+
+                            let volume = volume.clone();
+                            let token = token.clone();
+                            let selected_items = selectected_arc.clone();
+
+                            let tx = tx.clone();
+                            let selected = selected.clone();
+
+                            async move {
+                                let _ = tx.send((volume.id, 0)).await;
+
+                                let file = if try_exists(&download_path).await.unwrap_or(false) {
+                                    File::open(download_path).await
+                                } else {
+                                    File::create(download_path).await
+                                };
+
+                                if let Ok(mut file) = file {
+                                    let mut buffer: Vec<u8> = vec![];
+                                    sleep(Duration::from_millis(10 * count as u64)).await;
+                                    if volume.write_epub_to(&token, &mut buffer, tx).await.is_ok() {
+                                        let _ = file.write_all(&buffer).await.is_ok();
                                     }
-                                });
 
-                                join_all(futs).await;
+                                    if let Ok(mut selected_items) = selected_items.lock() {
+                                        let index = selected_items
+                                            .iter()
+                                            .enumerate()
+                                            .find_map(|(index, vol)| {
+                                                if vol.id == volume.id {
+                                                    Some(index)
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                            .unwrap();
+
+                                        selected_items.remove(index);
+                                        selected.lock().unwrap().remove(index);
+                                    }
+                                }
                             }
                         });
 
-                        self.mode = Mode::Normal;
+                        join_all(futs).await;
                     }
-                    _ => {}
-                }
+                });
 
-                Ok(())
+                self.mode = Mode::Normal;
             }
-            _ => Ok(()),
-        }
+            _ => {}
+        };
+
+        Ok(())
     }
 
     pub fn render<B>(&mut self, frame: &mut Frame<B>, rect: Rect)
@@ -310,11 +311,7 @@ impl Download {
 
                 let download_title = format!(
                     "Queue{}",
-                    if let DownloadDestination::Current(_) = self.destination {
-                        " (D)"
-                    } else {
-                        ""
-                    }
+                    if selected_items.len() > 0 { " (D)" } else { "" }
                 );
                 let block = Block::default().title(download_title).borders(Borders::ALL);
 
@@ -347,7 +344,7 @@ impl Download {
         match (&mut self.mode, event.code) {
             (Mode::Normal, KeyCode::Char('f')) => {
                 self.mode = Mode::Download;
-                self.destination = DownloadDestination::None;
+                self.destination = DownloadDestination::Selecting;
 
                 *normal_mode = false;
 
@@ -453,12 +450,4 @@ impl Download {
     pub fn get_selections(&self) -> Arc<Mutex<Vec<usize>>> {
         self.selected.clone()
     }
-}
-
-async fn download_dir() -> Option<PathBuf> {
-    None
-}
-
-async fn set_download_dir(_path: &Path) -> anyhow::Result<()> {
-    Ok(())
 }

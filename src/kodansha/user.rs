@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Duration, Utc};
@@ -18,6 +18,7 @@ use super::Library;
 const CONFIG_DIR: &str = "k-download";
 const CONFIG_FILE: &str = "config.toml";
 const TOKEN_FILE: &str = "token.toml";
+const DOWNLOAD_FILE: &str = "download.toml";
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Credentials {
@@ -62,6 +63,11 @@ pub struct User {
     refresh: String,
     expirery: DateTime<Utc>,
     library: Arc<Mutex<Option<Library>>>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct DownloadFoler {
+    path: String,
 }
 
 impl User {
@@ -324,6 +330,58 @@ fn expirery(expires_in: i64) -> DateTime<Utc> {
     now + offset - slack
 }
 
+pub async fn download_dir() -> anyhow::Result<Option<PathBuf>> {
+    let mut data_dir = dirs::config_dir().ok_or(anyhow!("No data dir"))?;
+    data_dir.push(CONFIG_DIR);
+    data_dir.push(DOWNLOAD_FILE);
+
+    let download_file = data_dir.into_os_string();
+    let download_path = download_file
+        .to_str()
+        .ok_or(anyhow!("Couldn't convert options path to path"))?;
+
+    let downlaod = if Path::new(download_path).exists() {
+        let download = tokio::fs::read_to_string(download_path).await?;
+
+        let download = toml::from_str::<DownloadFoler>(&download)?;
+
+        let buf: PathBuf = download.path.into();
+
+        Some(buf)
+    } else {
+        None
+    };
+
+    Ok(downlaod)
+}
+
+pub async fn set_download_dir(path: &Path) -> anyhow::Result<()> {
+    let mut data_dir = dirs::config_dir().ok_or(anyhow!("No data dir"))?;
+    data_dir.push(CONFIG_DIR);
+    data_dir.push(DOWNLOAD_FILE);
+
+    let download_file = data_dir.into_os_string();
+    let download_path = download_file
+        .to_str()
+        .ok_or(anyhow!("Couldn't convert options path to path"))?;
+
+    let downlad = DownloadFoler {
+        path: path
+            .to_owned()
+            .to_str()
+            .ok_or(anyhow!("Couldn't convert"))?
+            .to_string(),
+    };
+
+    let data = toml::to_string_pretty(&downlad)?;
+
+    let mut file = File::create(download_path).await?;
+
+    copy(&mut data.as_bytes(), &mut file).await?;
+
+    Ok(())
+}
+
 mod from_str {
     use serde::{self, Deserialize, Deserializer};
 
@@ -341,6 +399,6 @@ mod from_str {
         let string = String::deserialize(deserializer)?;
 
         let str: &str = string.as_str();
-        i64::from_str_radix(str, 10).map_err(serde::de::Error::custom)
+        str.parse::<i64>().map_err(serde::de::Error::custom)
     }
 }
