@@ -5,7 +5,7 @@ A tool to offline backup your [Kodansha](https://kodansha.us) library.
 ## Installation
 
 Currently we don't distribute pre-compiled binaries, so the best way to install this k-downloader is with cargo. 
-`cargo install --git git@github.com:BastianInuk/k-download.git`
+`cargo install --git https://github.com/BastianInuk/k-download.git`
 
 Run this command, and cargo should automatically install the tool for you.
 
