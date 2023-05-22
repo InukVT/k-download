@@ -10,6 +10,14 @@ pub struct Page {
     pub url: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemotePage {
+    pub page_number: usize,
+    #[serde(alias = "comicID")]
+    pub comic_id: usize,
+}
+
 impl Page {
     fn image_template(page: usize, path: String) -> String {
         format!(

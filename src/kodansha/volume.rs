@@ -13,6 +13,8 @@ use tokio::time::sleep;
 
 use crate::kodansha::Page;
 
+use super::page::RemotePage;
+
 #[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Volume<VolumeName = String> {
@@ -66,7 +68,7 @@ impl Volume {
 
         let builder = Arc::new(Mutex::new(builder));
 
-        let page_requests = self.page_links(token).await;
+        let page_requests = self.page_links(token).await?;
         let page_count = self.page_count as usize;
 
         for chunks in page_requests.chunks(10) {
@@ -92,38 +94,47 @@ impl Volume {
         Ok(())
     }
 
-    pub async fn page_links(&self, token: &String) -> Vec<(usize, Page)> {
-        let volume_route = format!("https://api.kodansha.us/comic/{}", self.id);
+    pub async fn page_links(&self, token: &String) -> anyhow::Result<Vec<(usize, Page)>> {
+        let volume_route = format!("https://api.kodansha.us/comic/{}/pages", self.id);
+        let bearer = format!("Bearer {}", &token);
 
-        let mut pages = Vec::new();
+        let pages = reqwest::Client::new()
+            .get(volume_route)
+            .header("authorization", bearer.clone())
+            .send()
+            .await?
+            .json::<Vec<RemotePage>>()
+            .await?;
 
-        for chunk in (0..self.page_count - 1).collect::<Vec<_>>().chunks(10) {
-            let volume_route = volume_route.clone();
-            let bearer = format!("Bearer {}", &token);
-            sleep(Duration::from_millis(10)).await;
+        let pages = join_all(
+            pages
+                .into_iter()
+                .map(|page| {
+                    let bearer = bearer.clone();
+                    async move {
+                        let page_number = page.page_number - 1;
+                        let url = format!(
+                            "https://api.kodansha.us/comic/{volume}/pages/{page}",
+                            volume = page.comic_id,
+                            page = page_number
+                        );
+                        let page = reqwest::Client::new()
+                            .get(url)
+                            .header("authorization", bearer)
+                            .send()
+                            .await
+                            .unwrap()
+                            .json::<Page>()
+                            .await
+                            .unwrap();
 
-            let chunk = chunk.iter().map(|index| {
-                let page_route = format!("{}/pages/{page}", volume_route, page = index);
+                        (page_number, page)
+                    }
+                })
+                .collect::<Vec<_>>(),
+        )
+        .await;
 
-                async {
-                    let page_request = reqwest::Client::new()
-                        .get(page_route)
-                        .header("authorization", bearer.clone())
-                        .send()
-                        .await
-                        .unwrap();
-                    (
-                        (*index as usize),
-                        page_request.json::<Page>().await.unwrap(),
-                    )
-                }
-            });
-
-            let mut collected: Vec<_> = join_all(chunk).await;
-
-            pages.append(&mut collected);
-        }
-
-        pages
+        Ok(pages)
     }
 }
