@@ -106,33 +106,28 @@ impl Volume {
             .json::<Vec<RemotePage>>()
             .await?;
 
-        let pages = join_all(
-            pages
-                .into_iter()
-                .map(|page| {
-                    let bearer = bearer.clone();
-                    async move {
-                        let page_number = page.page_number - 1;
-                        let url = format!(
-                            "https://api.kodansha.us/comic/{volume}/pages/{page}",
-                            volume = page.comic_id,
-                            page = page_number
-                        );
-                        let page = reqwest::Client::new()
-                            .get(url)
-                            .header("authorization", bearer)
-                            .send()
-                            .await
-                            .unwrap()
-                            .json::<Page>()
-                            .await
-                            .unwrap();
+        let pages = join_all(pages.into_iter().map(|page| {
+            let bearer = bearer.clone();
+            async move {
+                let page_number = page.page_number - 1;
+                let url = format!(
+                    "https://api.kodansha.us/comic/{volume}/pages/{page}",
+                    volume = page.comic_id,
+                    page = page_number
+                );
+                let page = reqwest::Client::new()
+                    .get(url)
+                    .header("authorization", bearer)
+                    .send()
+                    .await
+                    .unwrap()
+                    .json::<Page>()
+                    .await
+                    .unwrap();
 
-                        (page_number, page)
-                    }
-                })
-                .collect::<Vec<_>>(),
-        )
+                (page_number, page)
+            }
+        }))
         .await;
 
         Ok(pages)
