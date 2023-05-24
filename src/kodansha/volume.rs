@@ -11,8 +11,6 @@ use serde::Deserialize;
 use tokio::sync::mpsc::Sender;
 use tokio::time::sleep;
 
-use crate::kodansha::Page;
-
 use super::page::RemotePage;
 
 #[derive(Deserialize, Debug, Clone)]
@@ -72,8 +70,10 @@ impl Volume {
         let page_count = self.page_count as usize;
 
         for chunks in page_requests.chunks(10) {
-            let chunks = chunks.iter().map(|(page_number, page)| async {
-                page.write_to_epub(page_number, Arc::clone(&builder), token)
+            let chunks = chunks.iter().map(|page| async {
+                let (page_number, page) = page.into_async(token).await?;
+
+                page.write_to_epub(&page_number, Arc::clone(&builder), token)
                     .await
             });
 
@@ -94,48 +94,16 @@ impl Volume {
         Ok(())
     }
 
-    pub async fn page_links(&self, token: &String) -> anyhow::Result<Vec<(usize, Page)>> {
+    pub async fn page_links(&self, token: &String) -> reqwest::Result<Vec<RemotePage>> {
         let volume_route = format!("https://api.kodansha.us/comic/{}/pages", self.id);
         let bearer = format!("Bearer {}", &token);
 
-        let pages = reqwest::Client::new()
+        reqwest::Client::new()
             .get(volume_route)
             .header("authorization", bearer.clone())
             .send()
             .await?
             .json::<Vec<RemotePage>>()
-            .await?;
-
-        let mut pages_vec = Vec::new();
-
-        for chunk in pages.chunks(10) {
-            let mut pages = join_all(chunk.into_iter().map(|page| {
-                let bearer = bearer.clone();
-                async move {
-                    let page_number = page.page_number - 1;
-                    let url = format!(
-                        "https://api.kodansha.us/comic/{volume}/pages/{page}",
-                        volume = page.comic_id,
-                        page = page_number
-                    );
-                    let page = reqwest::Client::new()
-                        .get(url)
-                        .header("authorization", bearer)
-                        .send()
-                        .await
-                        .unwrap()
-                        .json::<Page>()
-                        .await
-                        .unwrap();
-
-                    (page_number, page)
-                }
-            }))
-            .await;
-
-            pages_vec.append(&mut pages);
-        }
-
-        Ok(pages_vec)
+            .await
     }
 }
