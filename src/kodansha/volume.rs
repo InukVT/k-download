@@ -3,13 +3,10 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use anyhow::Result;
-use epub_builder::EpubBuilder;
-use epub_builder::EpubVersion;
-use epub_builder::ZipLibrary;
+use epub_builder::{EpubBuilder, EpubVersion, ZipLibrary};
 use futures::future::join_all;
 use serde::Deserialize;
-use tokio::sync::mpsc::Sender;
-use tokio::time::sleep;
+use tokio::{sync::mpsc::Sender, time::sleep};
 
 use super::page::RemotePage;
 
